@@ -6,6 +6,7 @@ let approvalCount = 0;
 let serverRequestId = 10_000;
 
 const pendingApprovalRequests = new Map();
+const loadedThreads = new Set();
 
 const rl = readline.createInterface({
   input: process.stdin,
@@ -13,13 +14,12 @@ const rl = readline.createInterface({
 });
 
 function sendResponse(id, result) {
-  process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id, result })}\n`);
+  process.stdout.write(`${JSON.stringify({ id, result })}\n`);
 }
 
 function sendError(id, message) {
   process.stdout.write(
     `${JSON.stringify({
-      jsonrpc: '2.0',
       id,
       error: { code: -32601, message },
     })}\n`,
@@ -27,12 +27,12 @@ function sendError(id, message) {
 }
 
 function notify(method, params) {
-  process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', method, params })}\n`);
+  process.stdout.write(`${JSON.stringify({ method, params })}\n`);
 }
 
 function request(method, params) {
   const id = serverRequestId++;
-  process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
+  process.stdout.write(`${JSON.stringify({ id, method, params })}\n`);
   return id;
 }
 
@@ -50,7 +50,6 @@ function extractText(params) {
 
 function turnCompleted(threadId, turnId) {
   notify('turn/completed', {
-    threadId,
     turn: {
       id: turnId,
       items: [],
@@ -62,7 +61,6 @@ function turnCompleted(threadId, turnId) {
 
 function turnFailed(threadId, turnId, message) {
   notify('turn/completed', {
-    threadId,
     turn: {
       id: turnId,
       items: [],
@@ -102,6 +100,13 @@ rl.on('line', (line) => {
   }
 
   const msg = JSON.parse(line);
+  if ('jsonrpc' in msg) {
+    if (typeof msg.id === 'undefined') {
+      return;
+    }
+    sendError(msg.id, 'jsonrpc header must be omitted on wire');
+    return;
+  }
 
   // Client notification
   if (msg.method && typeof msg.id === 'undefined') {
@@ -122,9 +127,27 @@ rl.on('line', (line) => {
 
     if (method === 'thread/start') {
       threadCount += 1;
+      const threadId = `thread-${threadCount}`;
+      loadedThreads.add(threadId);
       sendResponse(id, {
         thread: {
-          id: `thread-${threadCount}`,
+          id: threadId,
+        },
+      });
+      return;
+    }
+
+    if (method === 'thread/resume') {
+      const threadId = params?.threadId;
+      if (typeof threadId !== 'string' || !threadId) {
+        sendError(id, 'threadId is required');
+        return;
+      }
+
+      loadedThreads.add(threadId);
+      sendResponse(id, {
+        thread: {
+          id: threadId,
         },
       });
       return;
@@ -134,6 +157,10 @@ rl.on('line', (line) => {
       turnCount += 1;
       const turnId = `turn-${turnCount}`;
       const threadId = params?.threadId;
+      if (!loadedThreads.has(threadId)) {
+        sendError(id, `thread is not loaded: ${String(threadId)}`);
+        return;
+      }
       const text = extractText(params);
 
       sendResponse(id, {

@@ -6,26 +6,22 @@ import type { WorkerClient, WorkerRunEvent } from './types.js';
 type JsonRpcId = number | string;
 
 interface JsonRpcSuccess {
-  jsonrpc: '2.0';
   id: JsonRpcId;
   result: unknown;
 }
 
 interface JsonRpcError {
-  jsonrpc: '2.0';
   id: JsonRpcId;
   error: { code: number; message: string };
 }
 
 interface JsonRpcRequest {
-  jsonrpc: '2.0';
   id: JsonRpcId;
   method: string;
   params?: unknown;
 }
 
 interface JsonRpcNotification {
-  jsonrpc: '2.0';
   method: string;
   params?: unknown;
 }
@@ -63,6 +59,8 @@ interface PendingApproval {
 const METHODS = {
   initialize: 'initialize',
   threadStart: 'thread/start',
+  threadResume: 'thread/resume',
+  threadClosed: 'thread/closed',
   turnStart: 'turn/start',
   turnSteer: 'turn/steer',
   commandApprovalRequest: 'item/commandExecution/requestApproval',
@@ -82,7 +80,9 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
   private readonly pending = new Map<JsonRpcId, PendingRequest>();
   private readonly streamBuffer: StreamEvent[] = [];
   private readonly streamWaiters: StreamWaiter[] = [];
+  private readonly loadedThreads = new Set<string>();
   private readonly activeTurnByThread = new Map<string, string>();
+  private readonly activeThreadByTurn = new Map<string, string>();
   private readonly pendingApprovals = new Map<string, PendingApproval>();
   private initializePromise: Promise<void> | null = null;
 
@@ -128,6 +128,7 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
     });
 
     const threadId = this.extractThreadId(result);
+    this.loadedThreads.add(threadId);
     return { codex_thread_id: threadId };
   }
 
@@ -137,6 +138,7 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
     user_id: string;
   }): Promise<WorkerRunEvent[]> {
     await this.ensureInitialized();
+    await this.ensureThreadLoaded(input.codex_thread_id);
 
     const result = await this.request<unknown>(METHODS.turnStart, {
       threadId: input.codex_thread_id,
@@ -145,6 +147,7 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
 
     const turnId = this.extractTurnIdFromStart(result);
     this.activeTurnByThread.set(input.codex_thread_id, turnId);
+    this.activeThreadByTurn.set(turnId, input.codex_thread_id);
 
     return this.collectTurnEvents(input.codex_thread_id, turnId);
   }
@@ -155,6 +158,7 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
     user_id: string;
   }): Promise<WorkerRunEvent[]> {
     await this.ensureInitialized();
+    await this.ensureThreadLoaded(input.codex_thread_id);
 
     const activeTurnId = this.activeTurnByThread.get(input.codex_thread_id);
     if (!activeTurnId) {
@@ -167,8 +171,7 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
       input: [this.buildTextInput(input.text)],
     });
 
-    // turn/steer 後のイベントは進行中 turn のストリームに乗るため、ここでは非同期反映を待たない。
-    return [];
+    return this.collectTurnEvents(input.codex_thread_id, activeTurnId);
   }
 
   public async sendApprovalDecision(input: {
@@ -244,8 +247,26 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
       return;
     }
 
+    if (parsed.method === METHODS.threadClosed) {
+      const params = this.asRecord(parsed.params);
+      const threadId = this.asString(params.threadId);
+      if (threadId) {
+        this.loadedThreads.delete(threadId);
+        this.activeTurnByThread.delete(threadId);
+      }
+    }
+
     const event = this.toStreamEvent('notification', parsed.method, parsed.params);
     this.pushStreamEvent(event);
+  }
+
+  private async ensureThreadLoaded(threadId: string): Promise<void> {
+    if (this.loadedThreads.has(threadId)) {
+      return;
+    }
+
+    await this.request(METHODS.threadResume, { threadId });
+    this.loadedThreads.add(threadId);
   }
 
   private toStreamEvent(
@@ -271,15 +292,21 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
     threadId?: string;
     turnId?: string;
   } {
-    const threadId = this.asString(params.threadId);
+    let threadId = this.asString(params.threadId);
 
     const turnIdDirect = this.asString(params.turnId);
     if (turnIdDirect) {
+      if (!threadId) {
+        threadId = this.activeThreadByTurn.get(turnIdDirect);
+      }
       return { threadId, turnId: turnIdDirect };
     }
 
     const turn = this.asRecord(params.turn);
     const turnIdFromTurn = this.asString(turn.id);
+    if (turnIdFromTurn && !threadId) {
+      threadId = this.activeThreadByTurn.get(turnIdFromTurn);
+    }
     return { threadId, turnId: turnIdFromTurn };
   }
 
@@ -333,7 +360,7 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
 
     while (true) {
       const streamEvent = await this.waitForStreamEvent(
-        (event) => event.threadId === threadId && event.turnId === turnId,
+        (event) => event.turnId === turnId && (!event.threadId || event.threadId === threadId),
       );
 
       if (streamEvent.kind === 'request') {
@@ -371,6 +398,7 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
         const error = this.asRecord(streamEvent.params.error);
         const message = this.asString(error.message) ?? 'worker reported an error';
         this.activeTurnByThread.delete(threadId);
+        this.activeThreadByTurn.delete(turnId);
         out.push({ type: 'failed', error: message });
         return out;
       }
@@ -379,6 +407,7 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
         const turn = this.asRecord(streamEvent.params.turn);
         const status = this.asString(turn.status);
         this.activeTurnByThread.delete(threadId);
+        this.activeThreadByTurn.delete(turnId);
 
         if (status === 'failed') {
           const turnError = this.asRecord(turn.error);
@@ -501,7 +530,6 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
   private request<T>(method: string, params: object): Promise<T> {
     const id = this.nextId++;
     const payload = JSON.stringify({
-      jsonrpc: '2.0',
       id,
       method,
       params,
@@ -524,8 +552,8 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
 
   private notify(method: string, params?: object): Promise<void> {
     const payload = params
-      ? JSON.stringify({ jsonrpc: '2.0', method, params })
-      : JSON.stringify({ jsonrpc: '2.0', method });
+      ? JSON.stringify({ method, params })
+      : JSON.stringify({ method });
 
     return new Promise<void>((resolve, reject) => {
       this.child.stdin.write(`${payload}\n`, (err) => {
@@ -540,7 +568,6 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
 
   private respondToServerRequest(id: JsonRpcId, result: Record<string, unknown>): Promise<void> {
     const payload = JSON.stringify({
-      jsonrpc: '2.0',
       id,
       result,
     });
