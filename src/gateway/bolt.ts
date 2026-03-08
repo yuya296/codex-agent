@@ -7,10 +7,18 @@ export interface BoltGatewayRuntime {
   stop(): Promise<void>;
 }
 
-export function createBoltGatewayRuntime(gateway: Gateway): BoltGatewayRuntime {
+interface BoltRuntimeConfig {
+  botToken: string;
+  appToken: string;
+}
+
+export function createBoltGatewayRuntime(
+  gateway: Gateway,
+  config: BoltRuntimeConfig,
+): BoltGatewayRuntime {
   const app = new App({
-    token: process.env.SLACK_BOT_TOKEN,
-    appToken: process.env.SLACK_APP_TOKEN,
+    token: config.botToken,
+    appToken: config.appToken,
     socketMode: true,
   });
 

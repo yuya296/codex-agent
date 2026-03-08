@@ -6,16 +6,19 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "tsc --noEmit",
+    "setup": "node --import tsx src/cli/setup.ts",
     "start": "node --import tsx src/main.ts",
     "dev": "node --watch --import tsx src/main.ts",
     "test": "node --import tsx --test tests/**/*.test.ts"
   },
   "dependencies": {
+    "@iarna/toml": "^2.2.5",
     "@slack/bolt": "^4.5.0",
-    "dotenv": "^17.3.1"
+    "prompts": "^2.4.2"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@types/prompts": "^2.4.9",
     "tsx": "^4.20.0",
     "typescript": "^5.8.0"
   }

@@ -1,13 +1,13 @@
-import 'dotenv/config';
 import { createBoltGatewayRuntime } from './gateway/bolt.js';
 import { Gateway } from './gateway/gateway.js';
 import { Orchestrator } from './orchestrator/orchestrator.js';
 import { SessionRepository } from './repository/session-repository.js';
-import { loadConfigFromEnv } from './config/index.js';
+import { loadConfigFromToml } from './config/index.js';
 import { StdioJsonRpcWorkerClient } from './worker/stdio-jsonrpc-worker-client.js';
 
 async function main(): Promise<void> {
-  const config = loadConfigFromEnv(process.env);
+  const config = loadConfigFromToml();
+  process.env.CODEX_HOME = config.codexHome;
 
   const repository = new SessionRepository(config.sqlitePath);
   const workerClient = new StdioJsonRpcWorkerClient(
@@ -35,6 +35,10 @@ async function main(): Promise<void> {
         });
       },
     })),
+    {
+      botToken: config.slackBotToken,
+      appToken: config.slackAppToken,
+    },
   );
 
   await runtime.start(config.port);
