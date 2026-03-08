@@ -6,10 +6,11 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "tsc --noEmit",
-    "setup": "node --import tsx src/cli/setup.ts",
-    "start": "node --import tsx src/main.ts",
-    "dev": "node --watch --import tsx src/main.ts",
-    "test": "node --import tsx --test tests/**/*.test.ts"
+    "setup": "node --no-warnings --import tsx src/cli/setup.ts",
+    "doctor": "node --no-warnings --import tsx src/cli/doctor.ts",
+    "start": "node --no-warnings --import tsx src/main.ts",
+    "dev": "node --no-warnings --watch --import tsx src/main.ts",
+    "test": "node --no-warnings --import tsx --test tests/**/*.test.ts"
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",
