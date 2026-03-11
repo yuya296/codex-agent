@@ -44,6 +44,9 @@ npm run setup
 - `~/.config/codex-agent` を自動作成
 - `config.toml` のパーミッションは `0600`
 
+Slack App 側の具体的な設定は以下を参照してください。  
+[Slack API 設定ガイド](./docs/slack-api-setup.md)
+
 ## 起動前チェック
 
 ```bash
@@ -103,4 +106,3 @@ sqlite_path = "./data/app.sqlite"
 - `npm run dev`: watch 起動
 - `npm run check`: TypeScript 型チェック
 - `npm test`: テスト実行
-
