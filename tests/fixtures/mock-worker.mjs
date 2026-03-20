@@ -3,7 +3,7 @@ import readline from 'node:readline';
 let threadCount = 0;
 let turnCount = 0;
 let approvalCount = 0;
-let serverRequestId = 10_000;
+let serverRequestId = 0;
 
 const pendingApprovalRequests = new Map();
 const loadedThreads = new Set();
@@ -84,6 +84,15 @@ function emitAgentMessage(threadId, turnId, text, phase = 'commentary') {
       text,
       phase,
     },
+  });
+}
+
+function emitAgentMessageDelta(threadId, turnId, text) {
+  notify('item/agentMessage/delta', {
+    threadId,
+    turnId,
+    itemId: `item-${Math.random().toString(16).slice(2)}`,
+    delta: text,
   });
 }
 
@@ -188,6 +197,23 @@ rl.on('line', (line) => {
         return;
       }
 
+      if (text.includes('[APPROVAL_NO_IDS]')) {
+        approvalCount += 1;
+        const approvalId = `approval-${approvalCount}`;
+        const requestId = request('item/commandExecution/requestApproval', {
+          itemId: `cmd-${approvalCount}`,
+          approvalId,
+          reason: 'need approval',
+          command: ['/bin/bash', '-lc', 'playwright-cli --version'],
+        });
+        pendingApprovalRequests.set(requestId, {
+          threadId,
+          turnId,
+          approvalId,
+        });
+        return;
+      }
+
       if (text.includes('[REQUEST_USER_INPUT]')) {
         request('item/tool/requestUserInput', {
           threadId,
@@ -212,6 +238,14 @@ rl.on('line', (line) => {
 
       if (text.includes('[STALL]')) {
         emitAgentMessage(threadId, turnId, `processing:${text}`, 'commentary');
+        return;
+      }
+
+      if (text.includes('[DELTA]')) {
+        emitAgentMessageDelta(threadId, turnId, '調査しています');
+        emitAgentMessageDelta(threadId, turnId, '。');
+        emitAgentMessage(threadId, turnId, 'done:delta', 'final_answer');
+        turnCompleted(threadId, turnId);
         return;
       }
 

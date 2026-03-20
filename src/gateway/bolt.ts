@@ -64,11 +64,15 @@ export function createBoltGatewayRuntime(
       decision,
     });
 
-    if (body?.channel?.id) {
-      await app.client.chat.postMessage({
-        channel: body.channel.id,
-        thread_ts: parsed.root_thread_ts,
-        text: `approval decision: ${decision}`,
+    const channelId = body?.channel?.id;
+    const messageTs = getActionMessageTs(body);
+    if (channelId && messageTs) {
+      const originalPrompt = readApprovalPrompt(body, parsed.prompt);
+      await app.client.chat.update({
+        channel: channelId,
+        ts: messageTs,
+        text: `${originalPrompt}\n\n選択: ${decision === 'approve' ? 'Approve' : 'Reject'}`,
+        blocks: buildResolvedApprovalBlocks(originalPrompt, decision) as any,
       });
     }
   };
@@ -108,6 +112,47 @@ export function toSlackMessageEvent(event: RawSlackMessageEvent): SlackMessageEv
     channel_type: event.channel_type,
     subtype: event.subtype,
   };
+}
+
+export function buildResolvedApprovalBlocks(
+  prompt: string,
+  decision: 'approve' | 'reject',
+): Array<Record<string, unknown>> {
+  return [
+    {
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: prompt,
+      },
+    },
+    {
+      type: 'context',
+      elements: [
+        {
+          type: 'mrkdwn',
+          text: `選択: *${decision === 'approve' ? 'Approve' : 'Reject'}*`,
+        },
+      ],
+    },
+  ];
+}
+
+export function getActionMessageTs(body: any): string | undefined {
+  return body?.container?.message_ts ?? body?.message?.ts;
+}
+
+export function readApprovalPrompt(body: any, fallback?: string): string {
+  const text = body?.message?.blocks?.[0]?.text?.text;
+  if (typeof text === 'string' && text.trim() !== '') {
+    return text;
+  }
+
+  if (typeof fallback === 'string' && fallback.trim() !== '') {
+    return fallback;
+  }
+
+  return 'Approval required to continue.';
 }
 
 function logSlackEvent(type: string, event: RawSlackMessageEvent): void {

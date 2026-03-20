@@ -203,3 +203,28 @@ test('missing session on thread reply should start a new session', async () => {
   repository.close();
   cleanupDir(tempDir);
 });
+
+test('worker callback: streaming progress should be reflected before returned events are empty', async () => {
+  const { tempDir, repository, worker, notifier, orchestrator } = createDeps();
+
+  worker.sendUserMessageImpl = async ({ text }, options) => {
+    await options?.onEvent?.({ type: 'progress', message: `stream:${text}` });
+    await options?.onEvent?.({ type: 'completed', message: `done:${text}` });
+    return [];
+  };
+
+  const started = await orchestrator.startSessionFromSlack({
+    slack_team_id: 'T1',
+    slack_channel_id: 'D1',
+    slack_root_thread_ts: '111.6',
+    user_id: 'U1',
+    text: 'live',
+  });
+
+  assert.equal(started.state, 'idle');
+  assert.deepEqual(notifier.progressMessages, ['thinking...', 'stream:live']);
+  assert.deepEqual(notifier.completedMessages, ['done:live']);
+
+  repository.close();
+  cleanupDir(tempDir);
+});
