@@ -18,6 +18,7 @@ export interface SlackPublisher {
     channel_id: string;
     root_thread_ts: string;
     status: string;
+    loading_messages?: string[];
   }): Promise<void>;
 }
 
@@ -28,6 +29,7 @@ export interface SlackMessageEvent {
   text: string;
   ts: string;
   thread_ts?: string;
+  parent_user_id?: string;
   assistant_thread?: {
     thread_ts?: string;
   };
@@ -40,8 +42,11 @@ export interface SlackApprovalAction {
   channel_id: string;
   root_thread_ts: string;
   approval_id: string;
+  prompt?: string;
   decision: ApprovalDecision;
 }
+
+const SLACK_LOADING_MESSAGE_MAX_LENGTH = 50;
 
 export class Gateway implements GatewayNotifier {
   public constructor(
@@ -54,8 +59,9 @@ export class Gateway implements GatewayNotifier {
       return;
     }
 
-    const rootThreadTs = event.assistant_thread?.thread_ts ?? event.thread_ts ?? event.ts;
-
+    const rootThreadTs =
+      event.assistant_thread?.thread_ts ??
+      (event.parent_user_id && event.thread_ts ? event.thread_ts : event.ts);
     if (rootThreadTs === event.ts) {
       const input: StartSessionInput = {
         slack_team_id: event.team_id,
@@ -91,11 +97,19 @@ export class Gateway implements GatewayNotifier {
   }
 
   public async notifyProgress(session: Session, message: string): Promise<void> {
-    await this.publisher.setThreadStatus({
-      channel_id: session.slack_channel_id,
-      root_thread_ts: session.slack_root_thread_ts,
-      status: message,
-    });
+    const loadingMessage = toSlackLoadingMessage(message);
+
+    try {
+      await this.publisher.setThreadStatus({
+        channel_id: session.slack_channel_id,
+        root_thread_ts: session.slack_root_thread_ts,
+        status: message,
+        loading_messages: [loadingMessage],
+      });
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error(`[slack:status-error] ${String(error)}`);
+    }
   }
 
   public async notifyApproval(
@@ -107,6 +121,7 @@ export class Gateway implements GatewayNotifier {
       channel_id: session.slack_channel_id,
       root_thread_ts: session.slack_root_thread_ts,
       approval_id: approval.approval_id,
+      prompt: approval.prompt,
     });
 
     await this.publisher.postThreadMessage({
@@ -159,4 +174,13 @@ export class Gateway implements GatewayNotifier {
       text: `:warning: ${message}`,
     });
   }
+}
+
+export function toSlackLoadingMessage(message: string): string {
+  const singleLine = message.replace(/\s+/g, ' ').trim();
+  if (singleLine.length <= SLACK_LOADING_MESSAGE_MAX_LENGTH) {
+    return singleLine || 'thinking...';
+  }
+
+  return `${singleLine.slice(0, SLACK_LOADING_MESSAGE_MAX_LENGTH - 1).trimEnd()}…`;
 }

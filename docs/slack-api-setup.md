@@ -3,7 +3,7 @@
 `codex-agent` は Slack Socket Mode で動作します。  
 このドキュメントでは、Slack App の作成から `npm start` で受信できる状態までを説明します。
 
-AgentChat の loading status を使う場合は、Slack App 側で `Agents & AI Apps` を有効化し、`codex-agent` 側で `SLACK_AGENT_CHAT_STATUS_ENABLED=true` を設定します。既定値は `false` で、未対応 token や通常 DM 運用ではそのまま使えます。
+classic な DM スレッド返信を維持しつつ loading status を使う前提なので、Slack App 側では `Agents & AI Apps` は有効化しますが、`Agent or Assistant` は OFF にします。`codex-agent` 側では `SLACK_AGENT_CHAT_STATUS_ENABLED=true` を設定します。既定値は `false` で、未対応 token や通常 DM 運用ではそのまま使えます。
 
 ## 必要な権限と設定
 
@@ -15,7 +15,7 @@ AgentChat の loading status を使う場合は、Slack App 側で `Agents & AI 
 不要なもの:
 
 - `assistant:write` はこの実装では不要
-- `assistant_thread_started` と `assistant_thread_context_changed` の購読も不要
+- `assistant_thread_started` と `assistant_thread_context_changed` はこの実装では不要
 
 ## 1. Slack App を作成
 
@@ -29,15 +29,15 @@ AgentChat の loading status を使う場合は、Slack App 側で `Agents & AI 
 3. Scope は `connections:write` を付与
 4. 発行された `xapp-...` を控える（`SLACK_APP_TOKEN`）
 
-## 3. Agents & AI Apps を有効化
+## 3. Agents & AI Apps を設定
 
 1. Slack App 管理画面の `Agents & AI Apps` を開く
-2. feature を有効化する
-3. AgentChat の loading status を使う場合だけ、後述の `slack_agent_chat_status_enabled` を `true` にする
+2. `Agent or Assistant` は OFF のままにする
+3. 後述の `SLACK_AGENT_CHAT_STATUS_ENABLED=true` を使う場合でも、`Agent or Assistant` は ON にしない
 
 補足:
 
-- ON にするのは `Agent or Assistant` のトグルです
+- `Agents & AI Apps` の画面自体は使いますが、classic thread UX を維持するため `Agent or Assistant` は OFF にします
 - `Agent or Assistant Overview` は未入力でも問題ありません
 - `Suggested Prompts` は今回の実装では不要です
 
@@ -67,7 +67,7 @@ Slack で「このアプリへのメッセージ送信はオフにされてい�
 1. `Event Subscriptions` を ON
 2. `Subscribe to bot events` に `message.im` を追加
 
-`assistant_thread_started` と `assistant_thread_context_changed` は今回の実装では不要です。
+classic thread 前提では `message.im` のみで十分です。
 
 ## 7. Interactivity を有効化
 
@@ -121,7 +121,8 @@ Slack で Bot に DM を送り、次を確認します。
   - トークン文字列の取り違えを確認（`xoxb-` と `xapp-`）
   - App を再インストールして最新 token を再取得
 - AgentChat の status が出ない
-  - `Agents & AI Apps` を有効化したか確認
+  - `Agents & AI Apps` の画面が利用可能な app か確認
+  - `Agent or Assistant` を OFF にしているか確認
   - `SLACK_AGENT_CHAT_STATUS_ENABLED=true` になっているか確認
   - scope や feature 変更後に `Reinstall to Workspace` したか確認
 - 「このアプリへのメッセージ送信はオフにされています。」と出る

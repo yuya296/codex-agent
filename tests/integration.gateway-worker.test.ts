@@ -19,6 +19,7 @@ class InMemorySlackPublisher implements SlackPublisher {
     channel_id: string;
     root_thread_ts: string;
     status: string;
+    loading_messages?: string[];
   }> = [];
 
   public async postThreadMessage(input: {
@@ -34,6 +35,7 @@ class InMemorySlackPublisher implements SlackPublisher {
     channel_id: string;
     root_thread_ts: string;
     status: string;
+    loading_messages?: string[];
   }): Promise<void> {
     this.statuses.push(input);
   }
@@ -67,8 +69,9 @@ test('integration: slack event -> gateway -> orchestrator -> stdio worker -> gat
     channel_type: 'im',
   });
 
-  assert.equal(publisher.statuses.length, 1);
-  assert.equal(publisher.statuses[0]?.status, 'processing:hello');
+  assert.equal(publisher.statuses.length, 2);
+  assert.equal(publisher.statuses[0]?.status, 'thinking...');
+  assert.equal(publisher.statuses[1]?.status, 'processing:hello');
   assert.equal(publisher.posted.length, 1);
   assert.equal(publisher.posted[0]?.text, 'done:hello');
 
@@ -138,12 +141,14 @@ test('integration: assistant_thread.thread_ts is used as slack root thread ts', 
     user_id: 'U1',
     text: 'follow-up',
     ts: '500.2',
+    parent_user_id: 'B1',
     assistant_thread: { thread_ts: '500.1' },
     channel_type: 'im',
   });
 
   assert.equal(publisher.statuses.at(-1)?.root_thread_ts, '500.1');
   assert.equal(publisher.statuses.at(-1)?.status, 'processing:follow-up');
+  assert.equal(publisher.statuses.at(-2)?.status, 'thinking...');
   assert.equal(publisher.posted.at(-1)?.text, 'done:follow-up');
 
   await worker.close();
@@ -178,7 +183,50 @@ test('integration: initial assistant_thread.thread_ts starts a new session when 
 
   assert.equal(publisher.statuses.at(-1)?.root_thread_ts, '500.1');
   assert.equal(publisher.statuses.at(-1)?.status, 'processing:hello');
+  assert.equal(publisher.statuses.at(-2)?.status, 'thinking...');
   assert.equal(publisher.posted.at(-1)?.text, 'done:hello');
+
+  await worker.close();
+  repository.close();
+  cleanupDir(tempDir);
+});
+
+test('integration: dm message with inherited thread_ts but no parent_user_id starts a new session', async () => {
+  const tempDir = createTempDir();
+  const repository = new SessionRepository(join(tempDir, 'app.sqlite'));
+  const worker = new StdioJsonRpcWorkerClient(process.execPath, [fixturePath()]);
+  const publisher = new InMemorySlackPublisher();
+
+  let gateway!: Gateway;
+  const orchestrator = new Orchestrator(repository, worker, {
+    notifyProgress: async (session, message) => gateway.notifyProgress(session, message),
+    notifyApproval: async (session, approval) => gateway.notifyApproval(session, approval),
+    notifyCompleted: async (session, message) => gateway.notifyCompleted(session, message),
+    notifyFailed: async (session, message) => gateway.notifyFailed(session, message),
+  });
+  gateway = new Gateway(orchestrator, publisher);
+
+  await gateway.handleMessageEvent({
+    team_id: 'T1',
+    channel_id: 'D1',
+    user_id: 'U1',
+    text: 'first',
+    ts: '500.1',
+    channel_type: 'im',
+  });
+
+  await gateway.handleMessageEvent({
+    team_id: 'T1',
+    channel_id: 'D1',
+    user_id: 'U1',
+    text: 'second',
+    ts: '500.3',
+    thread_ts: '500.1',
+    channel_type: 'im',
+  });
+
+  assert.equal(publisher.posted.at(-1)?.root_thread_ts, '500.3');
+  assert.equal(publisher.posted.at(-1)?.text, 'done:second');
 
   await worker.close();
   repository.close();

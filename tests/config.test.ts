@@ -12,6 +12,7 @@ test('loadConfigFromEnv: reads config from env and expands home paths', () => {
     CODEX_WORKER_COMMAND: 'codex',
     CODEX_WORKER_ARGS: 'app-server --listen stdio://',
     CODEX_WORKER_CWD: '~/workspace',
+    WORKER_STREAM_EVENT_TIMEOUT_MS: '600000',
     SQLITE_PATH: '~/data/app.sqlite',
     SLACK_AGENT_CHAT_STATUS_ENABLED: 'true',
     PORT: '3000',
@@ -22,6 +23,7 @@ test('loadConfigFromEnv: reads config from env and expands home paths', () => {
   assert.equal(loaded.codexHome, join(homedir(), '.codex'));
   assert.deepEqual(loaded.workerArgs, ['app-server', '--listen', 'stdio://']);
   assert.equal(loaded.workerCwd, join(homedir(), 'workspace'));
+  assert.equal(loaded.workerStreamEventTimeoutMs, 600000);
   assert.equal(loaded.sqlitePath, join(homedir(), 'data', 'app.sqlite'));
   assert.equal(loaded.slackAgentChatStatusEnabled, true);
   assert.equal(loaded.port, 3000);
@@ -37,6 +39,7 @@ test('loadConfigFromEnv: applies defaults for optional values', () => {
   assert.equal(loaded.workerCommand, 'codex');
   assert.deepEqual(loaded.workerArgs, ['app-server']);
   assert.equal(loaded.sqlitePath, './data/app.sqlite');
+  assert.equal(loaded.workerStreamEventTimeoutMs, 300000);
   assert.equal(loaded.slackAgentChatStatusEnabled, false);
 });
 

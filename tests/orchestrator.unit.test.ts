@@ -15,7 +15,7 @@ function createDeps() {
 }
 
 test('running state: additional message should be handled as steer', async () => {
-  const { tempDir, repository, worker, orchestrator } = createDeps();
+  const { tempDir, repository, worker, notifier, orchestrator } = createDeps();
 
   worker.sendUserMessageImpl = async ({ text }) => [{ type: 'progress', message: `working:${text}` }];
   worker.sendSteerMessageImpl = async ({ text }) => [{ type: 'progress', message: `steer:${text}` }];
@@ -40,13 +40,14 @@ test('running state: additional message should be handled as steer', async () =>
   assert.equal(continued.state, 'running');
   assert.equal(worker.sendSteerMessageCalls.length, 1);
   assert.equal(worker.sendSteerMessageCalls[0]?.text, 'second');
+  assert.deepEqual(notifier.progressMessages, ['thinking...', 'working:first', 'thinking...', 'steer:second']);
 
   repository.close();
   cleanupDir(tempDir);
 });
 
 test('waiting_approval state: additional message should reject current approval and send new user message', async () => {
-  const { tempDir, repository, worker, orchestrator } = createDeps();
+  const { tempDir, repository, worker, notifier, orchestrator } = createDeps();
 
   worker.sendUserMessageImpl = async ({ text }) => {
     if (text === 'first') {
@@ -94,13 +95,14 @@ test('waiting_approval state: additional message should reject current approval 
   ]);
   assert.equal(worker.sendApprovalDecisionCalls[0]?.decision, 'reject');
   assert.equal(worker.sendUserMessageCalls.at(-1)?.text, 'new-plan');
+  assert.deepEqual(notifier.progressMessages, ['thinking...', 'thinking...']);
 
   repository.close();
   cleanupDir(tempDir);
 });
 
 test('approval button: decision should be forwarded to worker', async () => {
-  const { tempDir, repository, worker, orchestrator } = createDeps();
+  const { tempDir, repository, worker, notifier, orchestrator } = createDeps();
 
   worker.sendUserMessageImpl = async () => [
     {
@@ -130,6 +132,7 @@ test('approval button: decision should be forwarded to worker', async () => {
   assert.equal(worker.sendApprovalDecisionCalls[0]?.approval_id, 'approval-2');
   assert.equal(worker.sendApprovalDecisionCalls[0]?.decision, 'approve');
   assert.equal(resolved.state, 'idle');
+  assert.deepEqual(notifier.progressMessages, ['thinking...', 'thinking...']);
 
   repository.close();
   cleanupDir(tempDir);
@@ -167,13 +170,14 @@ test('failed session should remain resumable via same slack thread', async () =>
 
   assert.equal(resumed.state, 'idle');
   assert.equal(worker.sendUserMessageCalls.at(-1)?.text, 'retry');
+  assert.deepEqual(notifier.progressMessages, ['thinking...', 'thinking...']);
 
   repository.close();
   cleanupDir(tempDir);
 });
 
 test('missing session on thread reply should start a new session', async () => {
-  const { tempDir, repository, worker, orchestrator } = createDeps();
+  const { tempDir, repository, worker, notifier, orchestrator } = createDeps();
 
   worker.sendUserMessageImpl = async ({ text }) => [{ type: 'completed', message: `done:${text}` }];
 
@@ -187,6 +191,7 @@ test('missing session on thread reply should start a new session', async () => {
 
   assert.equal(started.state, 'idle');
   assert.deepEqual(worker.callLog, ['createThread', 'sendUserMessage']);
+  assert.deepEqual(notifier.progressMessages, ['thinking...']);
 
   const saved = repository.findBySlackThread({
     slack_team_id: 'T1',
@@ -194,6 +199,31 @@ test('missing session on thread reply should start a new session', async () => {
     slack_root_thread_ts: '111.5',
   });
   assert.equal(saved?.session_id, started.session_id);
+
+  repository.close();
+  cleanupDir(tempDir);
+});
+
+test('worker callback: streaming progress should be reflected before returned events are empty', async () => {
+  const { tempDir, repository, worker, notifier, orchestrator } = createDeps();
+
+  worker.sendUserMessageImpl = async ({ text }, options) => {
+    await options?.onEvent?.({ type: 'progress', message: `stream:${text}` });
+    await options?.onEvent?.({ type: 'completed', message: `done:${text}` });
+    return [];
+  };
+
+  const started = await orchestrator.startSessionFromSlack({
+    slack_team_id: 'T1',
+    slack_channel_id: 'D1',
+    slack_root_thread_ts: '111.6',
+    user_id: 'U1',
+    text: 'live',
+  });
+
+  assert.equal(started.state, 'idle');
+  assert.deepEqual(notifier.progressMessages, ['thinking...', 'stream:live']);
+  assert.deepEqual(notifier.completedMessages, ['done:live']);
 
   repository.close();
   cleanupDir(tempDir);

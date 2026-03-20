@@ -6,14 +6,24 @@ export type WorkerRunEvent =
   | { type: 'completed'; message: string }
   | { type: 'failed'; error: string };
 
+export interface WorkerRunOptions {
+  onEvent?: (event: WorkerRunEvent) => Promise<void> | void;
+}
+
 export interface WorkerClient {
   createThread(): Promise<{ codex_thread_id: string }>;
-  sendUserMessage(input: { codex_thread_id: string; text: string; user_id: string }): Promise<WorkerRunEvent[]>;
-  sendSteerMessage(input: { codex_thread_id: string; text: string; user_id: string }): Promise<WorkerRunEvent[]>;
+  sendUserMessage(
+    input: { codex_thread_id: string; text: string; user_id: string },
+    options?: WorkerRunOptions,
+  ): Promise<WorkerRunEvent[]>;
+  sendSteerMessage(
+    input: { codex_thread_id: string; text: string; user_id: string },
+    options?: WorkerRunOptions,
+  ): Promise<WorkerRunEvent[]>;
   sendApprovalDecision(input: {
     codex_thread_id: string;
     approval_id: string;
     decision: ApprovalDecision;
-  }): Promise<WorkerRunEvent[]>;
+  }, options?: WorkerRunOptions): Promise<WorkerRunEvent[]>;
   close(): Promise<void>;
 }

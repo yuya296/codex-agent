@@ -5,6 +5,10 @@ import { SessionRepository } from './repository/session-repository.js';
 import { loadConfigFromEnv } from './config/index.js';
 import { StdioJsonRpcWorkerClient } from './worker/stdio-jsonrpc-worker-client.js';
 
+const debugSlackEvents = process.env.DEBUG_SLACK_EVENTS === 'true';
+const debugWorkerEvents = process.env.DEBUG_WORKER_EVENTS === 'true';
+const debugWorkerEventDeltas = process.env.DEBUG_WORKER_EVENT_DELTAS === 'true';
+
 async function main(): Promise<void> {
   const config = loadConfigFromEnv();
   process.env.CODEX_HOME = config.codexHome;
@@ -14,6 +18,11 @@ async function main(): Promise<void> {
     config.workerCommand,
     config.workerArgs,
     config.workerCwd,
+    {
+      streamEventTimeoutMs: config.workerStreamEventTimeoutMs,
+      debugEvents: debugWorkerEvents,
+      debugDeltaEvents: debugWorkerEventDeltas,
+    },
   );
 
   let gateway!: Gateway;
@@ -27,6 +36,11 @@ async function main(): Promise<void> {
   const runtime = createBoltGatewayRuntime(
     (gateway = new Gateway(orchestrator, {
       postThreadMessage: async ({ channel_id, root_thread_ts, text, blocks }) => {
+        logSlackClient('chat.postMessage', {
+          channel_id,
+          root_thread_ts,
+          text,
+        });
         await runtime.app.client.chat.postMessage({
           channel: channel_id,
           thread_ts: root_thread_ts,
@@ -34,8 +48,13 @@ async function main(): Promise<void> {
           blocks: blocks as any,
         });
       },
-      setThreadStatus: async ({ channel_id, root_thread_ts, status }) => {
+      setThreadStatus: async ({ channel_id, root_thread_ts, status, loading_messages }) => {
         if (!config.slackAgentChatStatusEnabled) {
+          logSlackClient('chat.postMessage.status-fallback', {
+            channel_id,
+            root_thread_ts,
+            status,
+          });
           await runtime.app.client.chat.postMessage({
             channel: channel_id,
             thread_ts: root_thread_ts,
@@ -44,10 +63,17 @@ async function main(): Promise<void> {
           return;
         }
 
+        logSlackClient('assistant.threads.setStatus', {
+          channel_id,
+          root_thread_ts,
+          status,
+          loading_messages,
+        });
         await runtime.app.client.assistant.threads.setStatus({
           channel_id,
           thread_ts: root_thread_ts,
           status,
+          loading_messages,
         });
       },
     })),
@@ -73,3 +99,12 @@ async function main(): Promise<void> {
 }
 
 void main();
+
+function logSlackClient(type: string, details: Record<string, unknown>): void {
+  if (!debugSlackEvents) {
+    return;
+  }
+
+  // eslint-disable-next-line no-console
+  console.log('[slack:client]', JSON.stringify({ type, ...details }));
+}
