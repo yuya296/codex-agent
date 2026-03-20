@@ -6,6 +6,8 @@ import { loadConfigFromEnv } from './config/index.js';
 import { StdioJsonRpcWorkerClient } from './worker/stdio-jsonrpc-worker-client.js';
 
 const debugSlackEvents = process.env.DEBUG_SLACK_EVENTS === 'true';
+const debugWorkerEvents = process.env.DEBUG_WORKER_EVENTS === 'true';
+const debugWorkerEventDeltas = process.env.DEBUG_WORKER_EVENT_DELTAS === 'true';
 
 async function main(): Promise<void> {
   const config = loadConfigFromEnv();
@@ -16,6 +18,11 @@ async function main(): Promise<void> {
     config.workerCommand,
     config.workerArgs,
     config.workerCwd,
+    {
+      streamEventTimeoutMs: config.workerStreamEventTimeoutMs,
+      debugEvents: debugWorkerEvents,
+      debugDeltaEvents: debugWorkerEventDeltas,
+    },
   );
 
   let gateway!: Gateway;

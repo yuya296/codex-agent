@@ -33,8 +33,12 @@ export SLACK_APP_TOKEN='xapp-...'
 - `CODEX_WORKER_COMMAND`
 - `CODEX_WORKER_ARGS`
 - `CODEX_WORKER_CWD`
+- `WORKER_STREAM_EVENT_TIMEOUT_MS`
 - `SQLITE_PATH`
 - `SLACK_AGENT_CHAT_STATUS_ENABLED`
+- `DEBUG_SLACK_EVENTS`
+- `DEBUG_WORKER_EVENTS`
+- `DEBUG_WORKER_EVENT_DELTAS`
 - `PORT`
 
 デフォルト値:
@@ -42,6 +46,7 @@ export SLACK_APP_TOKEN='xapp-...'
 - `CODEX_WORKER_COMMAND`: `codex`
 - `CODEX_WORKER_ARGS`: `app-server`
 - `CODEX_HOME`: `$CODEX_HOME` があればそれ、なければ `~/.codex`
+- `WORKER_STREAM_EVENT_TIMEOUT_MS`: `300000`
 - `SLACK_AGENT_CHAT_STATUS_ENABLED`: `false`
 - `SQLITE_PATH`: `./data/app.sqlite`
 
@@ -113,16 +118,26 @@ npm run dev
 ```bash
 SLACK_BOT_TOKEN=xoxb-...
 SLACK_APP_TOKEN=xapp-...
+DEBUG_SLACK_EVENTS=false
+DEBUG_WORKER_EVENTS=false
+DEBUG_WORKER_EVENT_DELTAS=false
 CODEX_HOME=~/.codex
 CODEX_WORKER_COMMAND=codex
 CODEX_WORKER_ARGS="app-server"
 CODEX_WORKER_CWD=
+WORKER_STREAM_EVENT_TIMEOUT_MS=300000
 SQLITE_PATH=./data/app.sqlite
 SLACK_AGENT_CHAT_STATUS_ENABLED=false
 PORT=
 ```
 
 `SLACK_AGENT_CHAT_STATUS_ENABLED=true` にすると、進捗通知に `assistant.threads.setStatus` を使います。classic な DM スレッド返信を維持したい場合は、Slack App 側の `Agent or Assistant` は OFF にしてください。
+
+`WORKER_STREAM_EVENT_TIMEOUT_MS` は worker の turn 内で無通信を許容する最大時間です。重い処理で 5 分が短い場合だけ伸ばしてください。
+
+`DEBUG_WORKER_EVENTS=true` にすると、worker から届いた turn 関連イベントを `[worker:event]` としてログ出力します。approval 待ち、サポート外の対話要求、silent timeout の切り分けに使えます。
+
+`DEBUG_WORKER_EVENT_DELTAS=true` を追加すると、`item/agentMessage/delta` などの高頻度イベントも出します。通常は `false` のままにしてください。
 
 ## npm scripts
 

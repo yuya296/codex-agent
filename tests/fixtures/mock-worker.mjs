@@ -188,6 +188,33 @@ rl.on('line', (line) => {
         return;
       }
 
+      if (text.includes('[REQUEST_USER_INPUT]')) {
+        request('item/tool/requestUserInput', {
+          threadId,
+          turnId,
+          itemId: `tool-${turnCount}`,
+          questions: [
+            {
+              id: 'location',
+              header: 'Location',
+              question: 'Where should I look?',
+              options: [
+                {
+                  label: 'Tokyo',
+                  description: 'Use Tokyo as the target.',
+                },
+              ],
+            },
+          ],
+        });
+        return;
+      }
+
+      if (text.includes('[STALL]')) {
+        emitAgentMessage(threadId, turnId, `processing:${text}`, 'commentary');
+        return;
+      }
+
       if (text.includes('[FAIL]')) {
         turnFailed(threadId, turnId, 'mock-failure');
         return;

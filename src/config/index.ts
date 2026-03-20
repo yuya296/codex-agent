@@ -10,6 +10,7 @@ export interface AppConfig {
   workerCommand: string;
   workerArgs: string[];
   workerCwd?: string;
+  workerStreamEventTimeoutMs: number;
   port?: number;
 }
 
@@ -20,6 +21,11 @@ export function loadConfigFromEnv(env: NodeJS.ProcessEnv = process.env): AppConf
   const workerCommand = env.CODEX_WORKER_COMMAND?.trim() || 'codex';
   const workerArgs = parseWorkerArgs(env.CODEX_WORKER_ARGS ?? 'app-server');
   const workerCwd = readOptionalString(env.CODEX_WORKER_CWD, 'CODEX_WORKER_CWD');
+  const workerStreamEventTimeoutMs = parsePositiveInteger(
+    env.WORKER_STREAM_EVENT_TIMEOUT_MS,
+    'WORKER_STREAM_EVENT_TIMEOUT_MS',
+    5 * 60 * 1000,
+  );
   const sqlitePath = expandHome(env.SQLITE_PATH?.trim() || './data/app.sqlite');
   const slackAgentChatStatusEnabled = parseOptionalBoolean(
     env.SLACK_AGENT_CHAT_STATUS_ENABLED,
@@ -37,6 +43,7 @@ export function loadConfigFromEnv(env: NodeJS.ProcessEnv = process.env): AppConf
     workerCommand,
     workerArgs,
     workerCwd: workerCwd ? expandHome(workerCwd) : undefined,
+    workerStreamEventTimeoutMs,
     port,
   };
 }
@@ -78,6 +85,19 @@ function parsePort(value: unknown): number | undefined {
   const asNumber = typeof value === 'number' ? value : Number(value);
   if (!Number.isInteger(asNumber) || asNumber <= 0) {
     throw new Error('PORT must be a positive integer when provided');
+  }
+
+  return asNumber;
+}
+
+function parsePositiveInteger(value: unknown, fieldName: string, defaultValue: number): number {
+  if (value === undefined || value === null || value === '') {
+    return defaultValue;
+  }
+
+  const asNumber = typeof value === 'number' ? value : Number(value);
+  if (!Number.isInteger(asNumber) || asNumber <= 0) {
+    throw new Error(`${fieldName} must be a positive integer when provided`);
   }
 
   return asNumber;

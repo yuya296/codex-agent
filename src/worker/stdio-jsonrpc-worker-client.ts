@@ -56,6 +56,12 @@ interface PendingApproval {
   turnId: string;
 }
 
+interface WorkerClientOptions {
+  streamEventTimeoutMs?: number;
+  debugEvents?: boolean;
+  debugDeltaEvents?: boolean;
+}
+
 const METHODS = {
   initialize: 'initialize',
   threadStart: 'thread/start',
@@ -67,15 +73,26 @@ const METHODS = {
   fileChangeApprovalRequest: 'item/fileChange/requestApproval',
   applyPatchApprovalRequest: 'applyPatchApproval',
   execCommandApprovalRequest: 'execCommandApproval',
+  requestUserInput: 'item/tool/requestUserInput',
+  elicitationRequest: 'mcpServer/elicitation/request',
+  dynamicToolCall: 'item/tool/call',
+  authRefreshRequest: 'account/chatgptAuthTokens/refresh',
   turnCompleted: 'turn/completed',
   itemCompleted: 'item/completed',
   error: 'error',
 } as const;
-
-const STREAM_EVENT_TIMEOUT_MS = 5 * 60 * 1000;
+const DEFAULT_STREAM_EVENT_TIMEOUT_MS = 5 * 60 * 1000;
 const IGNORED_STDERR_PATTERNS = [
   'failed to refresh available models: timeout waiting for child process to exit',
 ] as const;
+const NOISY_DELTA_METHODS = new Set<string>([
+  'item/agentMessage/delta',
+  'item/plan/delta',
+  'item/commandExecution/outputDelta',
+  'item/fileChange/outputDelta',
+  'item/reasoning/summaryTextDelta',
+  'item/reasoning/textDelta',
+]);
 
 export class StdioJsonRpcWorkerClient implements WorkerClient {
   private readonly child: ChildProcessWithoutNullStreams;
@@ -88,12 +105,18 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
   private readonly activeThreadByTurn = new Map<string, string>();
   private readonly pendingApprovals = new Map<string, PendingApproval>();
   private initializePromise: Promise<void> | null = null;
+  private readonly streamEventTimeoutMs: number;
+  private readonly debugEvents: boolean;
+  private readonly debugDeltaEvents: boolean;
 
-  public constructor(command: string, args: string[] = [], cwd?: string) {
+  public constructor(command: string, args: string[] = [], cwd?: string, options: WorkerClientOptions = {}) {
     this.child = spawn(command, args, {
       cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
+    this.streamEventTimeoutMs = options.streamEventTimeoutMs ?? DEFAULT_STREAM_EVENT_TIMEOUT_MS;
+    this.debugEvents = options.debugEvents ?? false;
+    this.debugDeltaEvents = options.debugDeltaEvents ?? false;
 
     const rl = createInterface({ input: this.child.stdout });
     rl.on('line', (line) => {
@@ -298,9 +321,9 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
     threadId?: string;
     turnId?: string;
   } {
-    let threadId = this.asString(params.threadId);
+    let threadId = this.asString(params.threadId) ?? this.asString(params.thread_id);
 
-    const turnIdDirect = this.asString(params.turnId);
+    const turnIdDirect = this.asString(params.turnId) ?? this.asString(params.turn_id);
     if (turnIdDirect) {
       if (!threadId) {
         threadId = this.activeThreadByTurn.get(turnIdDirect);
@@ -317,6 +340,7 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
   }
 
   private pushStreamEvent(event: StreamEvent): void {
+    this.logStreamEvent(event);
     const waiterIndex = this.streamWaiters.findIndex((waiter) => waiter.match(event));
     if (waiterIndex >= 0) {
       const [waiter] = this.streamWaiters.splice(waiterIndex, 1);
@@ -344,8 +368,8 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
     return new Promise<StreamEvent>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.removeWaiter(waiter);
-        reject(new Error(`timed out waiting for worker stream event (${STREAM_EVENT_TIMEOUT_MS}ms)`));
-      }, STREAM_EVENT_TIMEOUT_MS);
+        reject(new Error(`timed out waiting for worker stream event (${this.streamEventTimeoutMs}ms)`));
+      }, this.streamEventTimeoutMs);
 
       const waiter: StreamWaiter = { match, resolve, reject, timer };
       this.streamWaiters.push(waiter);
@@ -363,11 +387,18 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
     const out: WorkerRunEvent[] = [];
     let lastProgressMessage: string | null = null;
     let finalMessage: string | null = null;
+    let lastMatchedEvent: StreamEvent | null = null;
 
     while (true) {
-      const streamEvent = await this.waitForStreamEvent(
-        (event) => event.turnId === turnId && (!event.threadId || event.threadId === threadId),
-      );
+      let streamEvent: StreamEvent;
+      try {
+        streamEvent = await this.waitForStreamEvent(
+          (event) => event.turnId === turnId && (!event.threadId || event.threadId === threadId),
+        );
+      } catch (error) {
+        throw this.buildStreamTimeoutError(error, lastMatchedEvent);
+      }
+      lastMatchedEvent = streamEvent;
 
       if (streamEvent.kind === 'request') {
         const approvalId = this.tryRegisterApproval(streamEvent);
@@ -379,7 +410,13 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
           });
           return out;
         }
-        continue;
+        this.activeTurnByThread.delete(threadId);
+        this.activeThreadByTurn.delete(turnId);
+        out.push({
+          type: 'failed',
+          error: this.buildUnsupportedRequestError(streamEvent),
+        });
+        return out;
       }
 
       if (streamEvent.method === METHODS.itemCompleted) {
@@ -443,7 +480,9 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
 
     const approvalId =
       this.asString(streamEvent.params.approvalId)
+      ?? this.asString(streamEvent.params.approval_id)
       ?? this.asString(streamEvent.params.itemId)
+      ?? this.asString(streamEvent.params.item_id)
       ?? `request-${String(streamEvent.id ?? '')}`;
 
     if (!streamEvent.id || !streamEvent.threadId || !streamEvent.turnId) {
@@ -477,6 +516,91 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
     }
 
     return 'Approval required to continue.';
+  }
+
+  private buildUnsupportedRequestError(streamEvent: StreamEvent): string {
+    const details = this.summarizeEvent(streamEvent);
+    return `worker requested unsupported client interaction: ${streamEvent.method}${details ? ` (${details})` : ''}`;
+  }
+
+  private buildStreamTimeoutError(error: unknown, lastMatchedEvent: StreamEvent | null): Error {
+    const baseMessage = error instanceof Error ? error.message : String(error);
+    if (!baseMessage.includes('timed out waiting for worker stream event')) {
+      return error instanceof Error ? error : new Error(baseMessage);
+    }
+
+    if (!lastMatchedEvent) {
+      return new Error(`${baseMessage}; no turn-scoped worker event was received before timeout`);
+    }
+
+    const details = this.summarizeEvent(lastMatchedEvent);
+    return new Error(
+      `${baseMessage}; last turn event was ${lastMatchedEvent.kind}:${lastMatchedEvent.method}${details ? ` (${details})` : ''}`,
+    );
+  }
+
+  private summarizeEvent(event: StreamEvent): string {
+    const delta = this.asString(event.params.delta);
+    if (delta) {
+      return this.truncate(delta);
+    }
+
+    const reason = this.asString(event.params.reason);
+    const command = this.asString(event.params.command);
+    if (reason && command) {
+      return this.truncate(`${reason}; command=${command}`);
+    }
+    if (reason) {
+      return this.truncate(reason);
+    }
+    if (command) {
+      return this.truncate(`command=${command}`);
+    }
+
+    const questions = Array.isArray(event.params.questions) ? event.params.questions.length : null;
+    if (questions !== null) {
+      return `${questions} question(s)`;
+    }
+
+    const item = this.asRecord(event.params.item);
+    const itemType = this.asString(item.type);
+    const itemText = this.asString(item.text);
+    if (itemType && itemText) {
+      return this.truncate(`${itemType}:${itemText}`);
+    }
+    if (itemType) {
+      return itemType;
+    }
+
+    const status = this.asString(this.asRecord(event.params.turn).status);
+    if (status) {
+      return `status=${status}`;
+    }
+
+    return '';
+  }
+
+  private truncate(text: string, max = 120): string {
+    return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+  }
+
+  private logStreamEvent(event: StreamEvent): void {
+    if (!this.debugEvents) {
+      return;
+    }
+
+    if (NOISY_DELTA_METHODS.has(event.method) && !this.debugDeltaEvents) {
+      return;
+    }
+
+    // eslint-disable-next-line no-console
+    console.log('[worker:event]', JSON.stringify({
+      kind: event.kind,
+      method: event.method,
+      threadId: event.threadId ?? null,
+      turnId: event.turnId ?? null,
+      details: this.summarizeEvent(event) || null,
+    }));
   }
 
   private buildApprovalResponse(method: string, decision: ApprovalDecision): Record<string, unknown> {
