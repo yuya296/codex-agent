@@ -56,7 +56,7 @@ export class Orchestrator {
   public async continueSessionFromSlack(input: ContinueSessionInput): Promise<Session> {
     const session = this.repository.findBySlackThread(input);
     if (!session) {
-      throw new Error('session not found for thread reply');
+      return this.startSessionFromSlack(input);
     }
 
     let current = this.repository.updateSessionState({

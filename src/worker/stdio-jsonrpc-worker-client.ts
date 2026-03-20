@@ -73,6 +73,9 @@ const METHODS = {
 } as const;
 
 const STREAM_EVENT_TIMEOUT_MS = 5 * 60 * 1000;
+const IGNORED_STDERR_PATTERNS = [
+  'failed to refresh available models: timeout waiting for child process to exit',
+] as const;
 
 export class StdioJsonRpcWorkerClient implements WorkerClient {
   private readonly child: ChildProcessWithoutNullStreams;
@@ -113,6 +116,9 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
     this.child.stderr.on('data', (chunk) => {
       const text = chunk.toString('utf8').trim();
       if (text.length > 0) {
+        if (IGNORED_STDERR_PATTERNS.some((pattern) => text.includes(pattern))) {
+          return;
+        }
         // eslint-disable-next-line no-console
         console.error(`[worker] ${text}`);
       }

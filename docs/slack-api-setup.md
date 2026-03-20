@@ -3,7 +3,7 @@
 `codex-agent` は Slack Socket Mode で動作します。  
 このドキュメントでは、Slack App の作成から `npm start` で受信できる状態までを説明します。
 
-AgentChat の loading status を使う場合は、Slack App 側で `Agents & AI Apps` を有効化し、`codex-agent` 側で `slack_agent_chat_status_enabled = true` を設定します。既定値は `false` で、未対応 token や通常 DM 運用ではそのまま使えます。
+AgentChat の loading status を使う場合は、Slack App 側で `Agents & AI Apps` を有効化し、`codex-agent` 側で `SLACK_AGENT_CHAT_STATUS_ENABLED=true` を設定します。既定値は `false` で、未対応 token や通常 DM 運用ではそのまま使えます。
 
 ## 必要な権限と設定
 
@@ -83,13 +83,7 @@ scope や event を変更した場合も、必ず `Reinstall to Workspace` を�
 
 ## 9. codex-agent 側に設定
 
-プロジェクトルートで以下を実行します。
-
-```bash
-npm run setup
-```
-
-プロンプトで最低限以下を入力します。
+環境変数で最低限以下を設定します。
 
 - `SLACK_BOT_TOKEN`: `xoxb-...`
 - `SLACK_APP_TOKEN`: `xapp-...`
@@ -97,12 +91,12 @@ npm run setup
 - `CODEX_WORKER_COMMAND`: `codex`
 - `CODEX_WORKER_ARGS`: `app-server`
 
-`config.toml` で直接設定する場合は以下です。
+例:
 
-```toml
-[app]
-sqlite_path = "./data/app.sqlite"
-slack_agent_chat_status_enabled = true
+```bash
+export SLACK_BOT_TOKEN='xoxb-...'
+export SLACK_APP_TOKEN='xapp-...'
+export SLACK_AGENT_CHAT_STATUS_ENABLED=true
 ```
 
 未対応 token や通常 DM 運用では `false` のまま使ってください。
@@ -119,7 +113,7 @@ Slack で Bot に DM を送り、次を確認します。
 1. トップレベル投稿で新規セッションが開始される
 2. 同スレッド返信で継続入力として処理される
 3. 承認要求時に `Approve/Reject` ボタンが表示される
-4. `slack_agent_chat_status_enabled = true` の場合、進捗中に AgentChat の loading status が表示される
+4. `SLACK_AGENT_CHAT_STATUS_ENABLED=true` の場合、進捗中に AgentChat の loading status が表示される
 
 ## トラブルシュート
 
@@ -128,7 +122,7 @@ Slack で Bot に DM を送り、次を確認します。
   - App を再インストールして最新 token を再取得
 - AgentChat の status が出ない
   - `Agents & AI Apps` を有効化したか確認
-  - `slack_agent_chat_status_enabled = true` になっているか確認
+  - `SLACK_AGENT_CHAT_STATUS_ENABLED=true` になっているか確認
   - scope や feature 変更後に `Reinstall to Workspace` したか確認
 - 「このアプリへのメッセージ送信はオフにされています。」と出る
   - `Features` > `App Home` > `Messages Tab` が ON か確認

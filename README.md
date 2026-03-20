@@ -20,16 +20,22 @@ Slack DM と Codex (`codex app-server`) をつなぐ最小構成のエージェ�
 npm install
 ```
 
-2. 対話式セットアップを実行
+2. 環境変数を設定
 
 ```bash
-npm run setup
+export SLACK_BOT_TOKEN='xoxb-...'
+export SLACK_APP_TOKEN='xapp-...'
 ```
 
-`setup` は以下を対話入力し、`~/.config/codex-agent/config.toml` に保存します。
+必要に応じて以下も設定します。
 
-- 必須: `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `CODEX_HOME`, `CODEX_WORKER_COMMAND`, `CODEX_WORKER_ARGS`, `SQLITE_PATH`
-- 任意: `SLACK_AGENT_CHAT_STATUS_ENABLED`, `CODEX_WORKER_CWD`, `PORT`
+- `CODEX_HOME`
+- `CODEX_WORKER_COMMAND`
+- `CODEX_WORKER_ARGS`
+- `CODEX_WORKER_CWD`
+- `SQLITE_PATH`
+- `SLACK_AGENT_CHAT_STATUS_ENABLED`
+- `PORT`
 
 デフォルト値:
 
@@ -39,14 +45,9 @@ npm run setup
 - `SLACK_AGENT_CHAT_STATUS_ENABLED`: `false`
 - `SQLITE_PATH`: `./data/app.sqlite`
 
-保存時の挙動:
-
-- 既存 `config.toml` がある場合は上書き確認あり
-- `~/.config/codex-agent` を自動作成
-- `config.toml` のパーミッションは `0600`
-
 Slack App 側の具体的な設定は以下を参照してください。  
 [Slack API 設定ガイド](./docs/slack-api-setup.md)
+[Docker 運用ガイド](./docs/docker.md)
 
 必要な権限の要点:
 
@@ -74,6 +75,25 @@ npm run doctor
 npm start
 ```
 
+## Docker で起動
+
+Slack token などは外部環境変数から渡します。
+
+`.env.example` を `.env` にコピーして使えます。
+
+```bash
+docker compose up -d --build
+docker compose exec app codex login --device-auth
+```
+
+Docker では次を使います。
+
+- Codex 認証: `./.docker/codex-home`
+- Playwright profile: `./.docker/playwright-agent-profile`
+- SQLite: `./.docker/data/app.sqlite`
+
+詳細は [docs/docker.md](/Users/yuya/dev/codex-agent/docs/docker.md) を参照してください。
+
 開発時:
 
 ```bash
@@ -82,35 +102,28 @@ npm run dev
 
 補足:
 
-- 設定読み込みは `config.toml` のみです（`.env` は読みません）
-- 起動時に `codex.home` の値が `CODEX_HOME` 環境変数として worker プロセスに渡されます
+- アプリ本体は環境変数をそのまま読みます
+- Docker Compose は `.env` を読めますが、ローカル実行時に `.env` を自動ロードはしません
+- 起動時に `CODEX_HOME` の値が worker プロセスにも渡されます
 
-## 設定ファイル形式
+## 環境変数
 
-`~/.config/codex-agent/config.toml`
-
-```toml
-[slack]
-bot_token = "xoxb-..."
-app_token = "xapp-..."
-
-[codex]
-home = "~/.codex"
-worker_command = "codex"
-worker_args = ["app-server"]
-# worker_cwd = "/absolute/path" # optional
-
-[app]
-sqlite_path = "./data/app.sqlite"
-slack_agent_chat_status_enabled = false
-# port = 3000 # optional
+```bash
+SLACK_BOT_TOKEN=xoxb-...
+SLACK_APP_TOKEN=xapp-...
+CODEX_HOME=~/.codex
+CODEX_WORKER_COMMAND=codex
+CODEX_WORKER_ARGS="app-server"
+CODEX_WORKER_CWD=
+SQLITE_PATH=./data/app.sqlite
+SLACK_AGENT_CHAT_STATUS_ENABLED=false
+PORT=
 ```
 
-`slack_agent_chat_status_enabled = true` にすると、進捗通知に `assistant.threads.setStatus` を使います。通常の DM 運用や未対応 token の環境では `false` のまま使ってください。
+`SLACK_AGENT_CHAT_STATUS_ENABLED=true` にすると、進捗通知に `assistant.threads.setStatus` を使います。通常の DM 運用や未対応 token の環境では `false` のまま使ってください。
 
 ## npm scripts
 
-- `npm run setup`: 対話式設定
 - `npm run doctor`: 環境チェック
 - `npm start`: 本番起動
 - `npm run dev`: watch 起動

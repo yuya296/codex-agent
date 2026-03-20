@@ -150,3 +150,37 @@ test('integration: assistant_thread.thread_ts is used as slack root thread ts', 
   repository.close();
   cleanupDir(tempDir);
 });
+
+test('integration: initial assistant_thread.thread_ts starts a new session when none exists', async () => {
+  const tempDir = createTempDir();
+  const repository = new SessionRepository(join(tempDir, 'app.sqlite'));
+  const worker = new StdioJsonRpcWorkerClient(process.execPath, [fixturePath()]);
+  const publisher = new InMemorySlackPublisher();
+
+  let gateway!: Gateway;
+  const orchestrator = new Orchestrator(repository, worker, {
+    notifyProgress: async (session, message) => gateway.notifyProgress(session, message),
+    notifyApproval: async (session, approval) => gateway.notifyApproval(session, approval),
+    notifyCompleted: async (session, message) => gateway.notifyCompleted(session, message),
+    notifyFailed: async (session, message) => gateway.notifyFailed(session, message),
+  });
+  gateway = new Gateway(orchestrator, publisher);
+
+  await gateway.handleMessageEvent({
+    team_id: 'T1',
+    channel_id: 'D1',
+    user_id: 'U1',
+    text: 'hello',
+    ts: '500.2',
+    assistant_thread: { thread_ts: '500.1' },
+    channel_type: 'im',
+  });
+
+  assert.equal(publisher.statuses.at(-1)?.root_thread_ts, '500.1');
+  assert.equal(publisher.statuses.at(-1)?.status, 'processing:hello');
+  assert.equal(publisher.posted.at(-1)?.text, 'done:hello');
+
+  await worker.close();
+  repository.close();
+  cleanupDir(tempDir);
+});

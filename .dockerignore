@@ -1,9 +1,10 @@
+.git
+.docker
+.playwright
 node_modules
 dist
-.env
-.docker/
-.playwright/
+coverage
+data
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
-coverage

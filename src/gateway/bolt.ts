@@ -37,6 +37,22 @@ export function createBoltGatewayRuntime(
       subtype?: string;
     };
 
+    // eslint-disable-next-line no-console
+    console.log(
+      '[slack:event]',
+      JSON.stringify({
+        team: messageEvent.team ?? null,
+        channel: messageEvent.channel,
+        user: messageEvent.user ?? null,
+        ts: messageEvent.ts,
+        thread_ts: messageEvent.thread_ts ?? null,
+        assistant_thread_ts: messageEvent.assistant_thread?.thread_ts ?? null,
+        channel_type: messageEvent.channel_type ?? null,
+        subtype: messageEvent.subtype ?? null,
+        has_text: Boolean(messageEvent.text),
+      }),
+    );
+
     if (!messageEvent.team || !messageEvent.user || !messageEvent.text || !messageEvent.channel_type) {
       return;
     }

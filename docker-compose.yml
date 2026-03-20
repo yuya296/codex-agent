@@ -1,0 +1,26 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    init: true
+    ipc: host
+    environment:
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:?SLACK_BOT_TOKEN is required}
+      SLACK_APP_TOKEN: ${SLACK_APP_TOKEN:?SLACK_APP_TOKEN is required}
+      SLACK_AGENT_CHAT_STATUS_ENABLED: ${SLACK_AGENT_CHAT_STATUS_ENABLED:-false}
+      CODEX_HOME: ${CODEX_HOME:-/codex-home}
+      CODEX_WORKER_COMMAND: ${CODEX_WORKER_COMMAND:-codex}
+      CODEX_WORKER_ARGS: ${CODEX_WORKER_ARGS:-app-server}
+      CODEX_WORKER_CWD: ${CODEX_WORKER_CWD:-/workspace}
+      SQLITE_PATH: ${SQLITE_PATH:-/data/app.sqlite}
+      PORT: ${PORT:-}
+      PLAYWRIGHT_AGENT_PROFILE_DIR: ${PLAYWRIGHT_AGENT_PROFILE_DIR:-/profiles/agent}
+      PLAYWRIGHT_MCP_CONFIG: ${PLAYWRIGHT_MCP_CONFIG:-/run/playwright/cli.config.json}
+    volumes:
+      - ./:/workspace
+      - ./.docker/codex-home:/codex-home
+      - ./.docker/playwright-agent-profile:/profiles/agent
+      - ./.docker/data:/data
+    stdin_open: true
+    tty: true

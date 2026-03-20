@@ -171,3 +171,30 @@ test('failed session should remain resumable via same slack thread', async () =>
   repository.close();
   cleanupDir(tempDir);
 });
+
+test('missing session on thread reply should start a new session', async () => {
+  const { tempDir, repository, worker, orchestrator } = createDeps();
+
+  worker.sendUserMessageImpl = async ({ text }) => [{ type: 'completed', message: `done:${text}` }];
+
+  const started = await orchestrator.continueSessionFromSlack({
+    slack_team_id: 'T1',
+    slack_channel_id: 'D1',
+    slack_root_thread_ts: '111.5',
+    user_id: 'U1',
+    text: 'first',
+  });
+
+  assert.equal(started.state, 'idle');
+  assert.deepEqual(worker.callLog, ['createThread', 'sendUserMessage']);
+
+  const saved = repository.findBySlackThread({
+    slack_team_id: 'T1',
+    slack_channel_id: 'D1',
+    slack_root_thread_ts: '111.5',
+  });
+  assert.equal(saved?.session_id, started.session_id);
+
+  repository.close();
+  cleanupDir(tempDir);
+});
