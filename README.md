@@ -54,6 +54,7 @@ Slack App 側の具体的な設定は以下を参照してください。
 - App-Level Token scope: `connections:write`
 - Bot Token Scopes: `chat:write`, `im:history`
 - Event Subscription: `message.im`
+- AgentChat status を使う場合の追加 Event Subscription: `assistant_thread_started`, `assistant_thread_context_changed`
 
 ## 起動前チェック
 
@@ -120,7 +121,7 @@ SLACK_AGENT_CHAT_STATUS_ENABLED=false
 PORT=
 ```
 
-`SLACK_AGENT_CHAT_STATUS_ENABLED=true` にすると、進捗通知に `assistant.threads.setStatus` を使います。通常の DM 運用や未対応 token の環境では `false` のまま使ってください。
+`SLACK_AGENT_CHAT_STATUS_ENABLED=true` にすると、進捗通知に `assistant.threads.setStatus` を使います。Slack App 側では `assistant_thread_started` と `assistant_thread_context_changed` も購読してください。通常の DM 運用や未対応 token の環境では `false` のまま使ってください。
 
 ## npm scripts
 

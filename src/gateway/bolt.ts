@@ -1,5 +1,10 @@
-import { App } from '@slack/bolt';
-import { Gateway, type SlackApprovalAction } from './gateway.js';
+import { App, Assistant } from '@slack/bolt';
+import {
+  Gateway,
+  type SlackApprovalAction,
+  type SlackMessageEvent,
+  type SlackStatusPublisher,
+} from './gateway.js';
 
 export interface BoltGatewayRuntime {
   app: App;
@@ -12,6 +17,22 @@ interface BoltRuntimeConfig {
   appToken: string;
 }
 
+interface RawSlackMessageEvent {
+  team?: string;
+  channel: string;
+  user?: string;
+  text?: string;
+  ts: string;
+  thread_ts?: string;
+  assistant_thread?: {
+    thread_ts?: string;
+  };
+  channel_type?: 'im' | 'channel' | 'group' | 'mpim';
+  subtype?: string;
+}
+
+const debugSlackEvents = process.env.DEBUG_SLACK_EVENTS === 'true';
+
 export function createBoltGatewayRuntime(
   gateway: Gateway,
   config: BoltRuntimeConfig,
@@ -22,52 +43,16 @@ export function createBoltGatewayRuntime(
     socketMode: true,
   });
 
+  app.assistant(createSlackAssistant(gateway));
+
   app.event('message', async ({ event }) => {
-    const messageEvent = event as {
-      team?: string;
-      channel: string;
-      user?: string;
-      text?: string;
-      ts: string;
-      thread_ts?: string;
-      assistant_thread?: {
-        thread_ts?: string;
-      };
-      channel_type?: 'im' | 'channel' | 'group' | 'mpim';
-      subtype?: string;
-    };
-
-    // eslint-disable-next-line no-console
-    console.log(
-      '[slack:event]',
-      JSON.stringify({
-        team: messageEvent.team ?? null,
-        channel: messageEvent.channel,
-        user: messageEvent.user ?? null,
-        ts: messageEvent.ts,
-        thread_ts: messageEvent.thread_ts ?? null,
-        assistant_thread_ts: messageEvent.assistant_thread?.thread_ts ?? null,
-        channel_type: messageEvent.channel_type ?? null,
-        subtype: messageEvent.subtype ?? null,
-        has_text: Boolean(messageEvent.text),
-      }),
-    );
-
-    if (!messageEvent.team || !messageEvent.user || !messageEvent.text || !messageEvent.channel_type) {
+    const messageEvent = toSlackMessageEvent(event as RawSlackMessageEvent);
+    logSlackEvent('message', event as RawSlackMessageEvent);
+    if (!messageEvent) {
       return;
     }
 
-    await gateway.handleMessageEvent({
-      team_id: messageEvent.team,
-      channel_id: messageEvent.channel,
-      user_id: messageEvent.user,
-      text: messageEvent.text,
-      ts: messageEvent.ts,
-      thread_ts: messageEvent.thread_ts,
-      assistant_thread: messageEvent.assistant_thread,
-      channel_type: messageEvent.channel_type,
-      subtype: messageEvent.subtype,
-    });
+    await gateway.handleMessageEvent(messageEvent);
   });
 
   const actionHandler = async ({ ack, body, action }: any, decision: 'approve' | 'reject') => {
@@ -110,4 +95,85 @@ export function createBoltGatewayRuntime(
       await app.stop();
     },
   };
+}
+
+export function createSlackAssistant(
+  gateway: Pick<Gateway, 'handleMessageEvent'>,
+): Assistant {
+  return new Assistant({
+    threadStarted: async ({ payload }) => {
+      logSlackEvent('assistant_thread_started', payload as unknown as RawSlackMessageEvent);
+    },
+    threadContextChanged: async ({ payload, saveThreadContext }) => {
+      logSlackEvent(
+        'assistant_thread_context_changed',
+        payload as unknown as RawSlackMessageEvent,
+      );
+      await saveThreadContext();
+    },
+    userMessage: async ({ payload, setStatus }) => {
+      logSlackEvent('assistant_user_message', payload as RawSlackMessageEvent);
+      const messageEvent = toSlackMessageEvent(payload as RawSlackMessageEvent);
+      if (!messageEvent) {
+        return;
+      }
+
+      const statusPublisher: SlackStatusPublisher = {
+        setThreadStatus: async ({ status, loading_messages }) => {
+          if (loading_messages?.length) {
+            await setStatus({
+              status,
+              loading_messages,
+            });
+            return;
+          }
+
+          await setStatus(status);
+        },
+      };
+
+      await gateway.handleMessageEvent(messageEvent, statusPublisher);
+    },
+  });
+}
+
+export function toSlackMessageEvent(event: RawSlackMessageEvent): SlackMessageEvent | null {
+  if (!event.team || !event.user || !event.text || !event.channel_type) {
+    return null;
+  }
+
+  return {
+    team_id: event.team,
+    channel_id: event.channel,
+    user_id: event.user,
+    text: event.text,
+    ts: event.ts,
+    thread_ts: event.thread_ts,
+    assistant_thread: event.assistant_thread,
+    channel_type: event.channel_type,
+    subtype: event.subtype,
+  };
+}
+
+function logSlackEvent(type: string, event: RawSlackMessageEvent): void {
+  if (!debugSlackEvents) {
+    return;
+  }
+
+  // eslint-disable-next-line no-console
+  console.log(
+    '[slack:event]',
+    JSON.stringify({
+      type,
+      team: event.team ?? null,
+      channel: event.channel ?? null,
+      user: event.user ?? null,
+      ts: event.ts ?? null,
+      thread_ts: event.thread_ts ?? null,
+      assistant_thread_ts: event.assistant_thread?.thread_ts ?? null,
+      channel_type: event.channel_type ?? null,
+      subtype: event.subtype ?? null,
+      has_text: Boolean(event.text),
+    }),
+  );
 }

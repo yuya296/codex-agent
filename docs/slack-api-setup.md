@@ -10,12 +10,12 @@ AgentChat の loading status を使う場合は、Slack App 側で `Agents & AI 
 - App-Level Token scope: `connections:write`
 - Bot Token Scopes: `chat:write`, `im:history`
 - Event Subscriptions: `message.im`
+- AgentChat status を使う場合の追加 Event Subscriptions: `assistant_thread_started`, `assistant_thread_context_changed`
 - Required features: `Socket Mode`, `Interactivity & Shortcuts`, `Agents & AI Apps`, `App Home` のメッセージ送信許可
 
 不要なもの:
 
 - `assistant:write` はこの実装では不要
-- `assistant_thread_started` と `assistant_thread_context_changed` の購読も不要
 
 ## 1. Slack App を作成
 
@@ -66,8 +66,9 @@ Slack で「このアプリへのメッセージ送信はオフにされてい�
 
 1. `Event Subscriptions` を ON
 2. `Subscribe to bot events` に `message.im` を追加
+3. `SLACK_AGENT_CHAT_STATUS_ENABLED=true` で AgentChat status を使う場合は、`assistant_thread_started` と `assistant_thread_context_changed` も追加
 
-`assistant_thread_started` と `assistant_thread_context_changed` は今回の実装では不要です。
+`codex-agent` は Bolt の `Assistant` middleware を使って AgentChat thread lifecycle を扱います。Slack 公式も `assistant_thread_started` / `assistant_thread_context_changed` / `message.im` の組み合わせを前提にしています。
 
 ## 7. Interactivity を有効化
 
@@ -123,6 +124,7 @@ Slack で Bot に DM を送り、次を確認します。
 - AgentChat の status が出ない
   - `Agents & AI Apps` を有効化したか確認
   - `SLACK_AGENT_CHAT_STATUS_ENABLED=true` になっているか確認
+  - `assistant_thread_started` と `assistant_thread_context_changed` を購読しているか確認
   - scope や feature 変更後に `Reinstall to Workspace` したか確認
 - 「このアプリへのメッセージ送信はオフにされています。」と出る
   - `Features` > `App Home` > `Messages Tab` が ON か確認
@@ -137,4 +139,5 @@ Slack で Bot に DM を送り、次を確認します。
 ## 参考
 
 - [Developing AI apps](https://docs.slack.dev/ai/developing-ai-apps)
+- [Using AI in Apps](https://docs.slack.dev/tools/bolt-js/concepts/ai-apps/)
 - [Set status scope update (2026-03-05)](https://docs.slack.dev/changelog/2026/03/05/set-status-scope-update/)

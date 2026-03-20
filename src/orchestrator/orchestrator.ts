@@ -35,6 +35,7 @@ export class Orchestrator {
     });
 
     try {
+      await this.notifier.notifyProgress(session, 'thinking...');
       const events = await this.workerClient.sendUserMessage({
         codex_thread_id,
         user_id: input.user_id,
@@ -67,6 +68,7 @@ export class Orchestrator {
 
     try {
       if (session.state === 'running') {
+        await this.notifier.notifyProgress(current, 'thinking...');
         const steerEvents = await this.workerClient.sendSteerMessage({
           codex_thread_id: session.codex_thread_id,
           user_id: input.user_id,
@@ -89,6 +91,7 @@ export class Orchestrator {
         });
       }
 
+      await this.notifier.notifyProgress(current, 'thinking...');
       const events = await this.workerClient.sendUserMessage({
         codex_thread_id: session.codex_thread_id,
         user_id: input.user_id,
@@ -120,6 +123,7 @@ export class Orchestrator {
     });
 
     try {
+      await this.notifier.notifyProgress(running, 'thinking...');
       const events = await this.workerClient.sendApprovalDecision({
         codex_thread_id: session.codex_thread_id,
         approval_id: approvalId,
