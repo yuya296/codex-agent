@@ -7,8 +7,6 @@ import type {
 } from '../domain/types.js';
 import type { Orchestrator, GatewayNotifier } from '../orchestrator/orchestrator.js';
 
-const debugSlackEvents = process.env.DEBUG_SLACK_EVENTS === 'true';
-
 export interface SlackPublisher {
   postThreadMessage(input: {
     channel_id: string;
@@ -24,8 +22,6 @@ export interface SlackPublisher {
   }): Promise<void>;
 }
 
-export interface SlackStatusPublisher extends Pick<SlackPublisher, 'setThreadStatus'> {}
-
 export interface SlackMessageEvent {
   team_id: string;
   channel_id: string;
@@ -33,6 +29,7 @@ export interface SlackMessageEvent {
   text: string;
   ts: string;
   thread_ts?: string;
+  parent_user_id?: string;
   assistant_thread?: {
     thread_ts?: string;
   };
@@ -49,46 +46,39 @@ export interface SlackApprovalAction {
 }
 
 export class Gateway implements GatewayNotifier {
-  private readonly statusPublishers = new Map<string, SlackStatusPublisher>();
-
   public constructor(
     private readonly orchestrator: Orchestrator,
     private readonly publisher: SlackPublisher,
   ) {}
 
-  public async handleMessageEvent(
-    event: SlackMessageEvent,
-    statusPublisher?: SlackStatusPublisher,
-  ): Promise<void> {
+  public async handleMessageEvent(event: SlackMessageEvent): Promise<void> {
     if (event.channel_type !== 'im' || event.subtype) {
       return;
     }
 
-    const rootThreadTs = event.assistant_thread?.thread_ts ?? event.thread_ts ?? event.ts;
-    const run = async () => {
-      if (rootThreadTs === event.ts) {
-        const input: StartSessionInput = {
-          slack_team_id: event.team_id,
-          slack_channel_id: event.channel_id,
-          slack_root_thread_ts: rootThreadTs,
-          user_id: event.user_id,
-          text: event.text,
-        };
-        await this.orchestrator.startSessionFromSlack(input);
-        return;
-      }
-
-      const input: ContinueSessionInput = {
+    const rootThreadTs =
+      event.assistant_thread?.thread_ts ??
+      (event.parent_user_id && event.thread_ts ? event.thread_ts : event.ts);
+    if (rootThreadTs === event.ts) {
+      const input: StartSessionInput = {
         slack_team_id: event.team_id,
         slack_channel_id: event.channel_id,
         slack_root_thread_ts: rootThreadTs,
         user_id: event.user_id,
         text: event.text,
       };
-      await this.orchestrator.continueSessionFromSlack(input);
-    };
+      await this.orchestrator.startSessionFromSlack(input);
+      return;
+    }
 
-    await this.withStatusPublisher(rootThreadTs, statusPublisher, run);
+    const input: ContinueSessionInput = {
+      slack_team_id: event.team_id,
+      slack_channel_id: event.channel_id,
+      slack_root_thread_ts: rootThreadTs,
+      user_id: event.user_id,
+      text: event.text,
+    };
+    await this.orchestrator.continueSessionFromSlack(input);
   }
 
   public async handleApprovalAction(action: SlackApprovalAction): Promise<void> {
@@ -104,11 +94,7 @@ export class Gateway implements GatewayNotifier {
   }
 
   public async notifyProgress(session: Session, message: string): Promise<void> {
-    logSlackPublish('progress', session.slack_root_thread_ts, {
-      status: message,
-      uses_status_publisher: this.statusPublishers.has(session.slack_root_thread_ts),
-    });
-    await this.resolveStatusPublisher(session.slack_root_thread_ts).setThreadStatus({
+    await this.publisher.setThreadStatus({
       channel_id: session.slack_channel_id,
       root_thread_ts: session.slack_root_thread_ts,
       status: message,
@@ -120,9 +106,6 @@ export class Gateway implements GatewayNotifier {
     session: Session,
     approval: { approval_id: string; prompt: string },
   ): Promise<void> {
-    logSlackPublish('approval', session.slack_root_thread_ts, {
-      uses_status_publisher: this.statusPublishers.has(session.slack_root_thread_ts),
-    });
     const actionValue = JSON.stringify({
       team_id: session.slack_team_id,
       channel_id: session.slack_channel_id,
@@ -166,10 +149,6 @@ export class Gateway implements GatewayNotifier {
   }
 
   public async notifyCompleted(session: Session, message: string): Promise<void> {
-    logSlackPublish('completed', session.slack_root_thread_ts, {
-      text: message,
-      uses_status_publisher: this.statusPublishers.has(session.slack_root_thread_ts),
-    });
     await this.publisher.postThreadMessage({
       channel_id: session.slack_channel_id,
       root_thread_ts: session.slack_root_thread_ts,
@@ -178,49 +157,10 @@ export class Gateway implements GatewayNotifier {
   }
 
   public async notifyFailed(session: Session, message: string): Promise<void> {
-    logSlackPublish('failed', session.slack_root_thread_ts, {
-      text: message,
-      uses_status_publisher: this.statusPublishers.has(session.slack_root_thread_ts),
-    });
     await this.publisher.postThreadMessage({
       channel_id: session.slack_channel_id,
       root_thread_ts: session.slack_root_thread_ts,
       text: `:warning: ${message}`,
     });
   }
-
-  private resolveStatusPublisher(rootThreadTs: string): SlackStatusPublisher {
-    return this.statusPublishers.get(rootThreadTs) ?? this.publisher;
-  }
-
-  private async withStatusPublisher(
-    rootThreadTs: string,
-    statusPublisher: SlackStatusPublisher | undefined,
-    run: () => Promise<void>,
-  ): Promise<void> {
-    if (!statusPublisher) {
-      await run();
-      return;
-    }
-
-    this.statusPublishers.set(rootThreadTs, statusPublisher);
-    try {
-      await run();
-    } finally {
-      this.statusPublishers.delete(rootThreadTs);
-    }
-  }
-}
-
-function logSlackPublish(
-  type: string,
-  rootThreadTs: string,
-  details: Record<string, unknown>,
-): void {
-  if (!debugSlackEvents) {
-    return;
-  }
-
-  // eslint-disable-next-line no-console
-  console.log('[slack:publish]', JSON.stringify({ type, root_thread_ts: rootThreadTs, ...details }));
 }

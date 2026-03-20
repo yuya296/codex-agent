@@ -1,10 +1,5 @@
-import { App, Assistant } from '@slack/bolt';
-import {
-  Gateway,
-  type SlackApprovalAction,
-  type SlackMessageEvent,
-  type SlackStatusPublisher,
-} from './gateway.js';
+import { App } from '@slack/bolt';
+import { Gateway, type SlackApprovalAction, type SlackMessageEvent } from './gateway.js';
 
 export interface BoltGatewayRuntime {
   app: App;
@@ -24,6 +19,7 @@ interface RawSlackMessageEvent {
   text?: string;
   ts: string;
   thread_ts?: string;
+  parent_user_id?: string;
   assistant_thread?: {
     thread_ts?: string;
   };
@@ -42,8 +38,6 @@ export function createBoltGatewayRuntime(
     appToken: config.appToken,
     socketMode: true,
   });
-
-  app.assistant(createSlackAssistant(gateway));
 
   app.event('message', async ({ event }) => {
     const messageEvent = toSlackMessageEvent(event as RawSlackMessageEvent);
@@ -97,46 +91,6 @@ export function createBoltGatewayRuntime(
   };
 }
 
-export function createSlackAssistant(
-  gateway: Pick<Gateway, 'handleMessageEvent'>,
-): Assistant {
-  return new Assistant({
-    threadStarted: async ({ payload }) => {
-      logSlackEvent('assistant_thread_started', payload as unknown as RawSlackMessageEvent);
-    },
-    threadContextChanged: async ({ payload, saveThreadContext }) => {
-      logSlackEvent(
-        'assistant_thread_context_changed',
-        payload as unknown as RawSlackMessageEvent,
-      );
-      await saveThreadContext();
-    },
-    userMessage: async ({ payload, setStatus }) => {
-      logSlackEvent('assistant_user_message', payload as RawSlackMessageEvent);
-      const messageEvent = toSlackMessageEvent(payload as RawSlackMessageEvent);
-      if (!messageEvent) {
-        return;
-      }
-
-      const statusPublisher: SlackStatusPublisher = {
-        setThreadStatus: async ({ status, loading_messages }) => {
-          if (loading_messages?.length) {
-            await setStatus({
-              status,
-              loading_messages,
-            });
-            return;
-          }
-
-          await setStatus(status);
-        },
-      };
-
-      await gateway.handleMessageEvent(messageEvent, statusPublisher);
-    },
-  });
-}
-
 export function toSlackMessageEvent(event: RawSlackMessageEvent): SlackMessageEvent | null {
   if (!event.team || !event.user || !event.text || !event.channel_type) {
     return null;
@@ -149,6 +103,7 @@ export function toSlackMessageEvent(event: RawSlackMessageEvent): SlackMessageEv
     text: event.text,
     ts: event.ts,
     thread_ts: event.thread_ts,
+    parent_user_id: event.parent_user_id,
     assistant_thread: event.assistant_thread,
     channel_type: event.channel_type,
     subtype: event.subtype,
@@ -170,6 +125,7 @@ function logSlackEvent(type: string, event: RawSlackMessageEvent): void {
       user: event.user ?? null,
       ts: event.ts ?? null,
       thread_ts: event.thread_ts ?? null,
+      parent_user_id: event.parent_user_id ?? null,
       assistant_thread_ts: event.assistant_thread?.thread_ts ?? null,
       channel_type: event.channel_type ?? null,
       subtype: event.subtype ?? null,

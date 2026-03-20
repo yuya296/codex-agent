@@ -141,6 +141,7 @@ test('integration: assistant_thread.thread_ts is used as slack root thread ts', 
     user_id: 'U1',
     text: 'follow-up',
     ts: '500.2',
+    parent_user_id: 'B1',
     assistant_thread: { thread_ts: '500.1' },
     channel_type: 'im',
   });
@@ -190,12 +191,11 @@ test('integration: initial assistant_thread.thread_ts starts a new session when 
   cleanupDir(tempDir);
 });
 
-test('integration: assistant thread status override is used while replies keep default publisher', async () => {
+test('integration: dm message with inherited thread_ts but no parent_user_id starts a new session', async () => {
   const tempDir = createTempDir();
   const repository = new SessionRepository(join(tempDir, 'app.sqlite'));
   const worker = new StdioJsonRpcWorkerClient(process.execPath, [fixturePath()]);
   const publisher = new InMemorySlackPublisher();
-  const overridePublisher = new InMemorySlackPublisher();
 
   let gateway!: Gateway;
   const orchestrator = new Orchestrator(repository, worker, {
@@ -206,26 +206,27 @@ test('integration: assistant thread status override is used while replies keep d
   });
   gateway = new Gateway(orchestrator, publisher);
 
-  await gateway.handleMessageEvent(
-    {
-      team_id: 'T1',
-      channel_id: 'D1',
-      user_id: 'U1',
-      text: 'hello',
-      ts: '500.2',
-      assistant_thread: { thread_ts: '500.1' },
-      channel_type: 'im',
-    },
-    overridePublisher,
-  );
+  await gateway.handleMessageEvent({
+    team_id: 'T1',
+    channel_id: 'D1',
+    user_id: 'U1',
+    text: 'first',
+    ts: '500.1',
+    channel_type: 'im',
+  });
 
-  assert.equal(publisher.statuses.length, 0);
-  assert.equal(publisher.posted.length, 1);
-  assert.equal(publisher.posted[0]?.text, 'done:hello');
-  assert.equal(overridePublisher.statuses.length, 2);
-  assert.equal(overridePublisher.statuses[0]?.status, 'thinking...');
-  assert.equal(overridePublisher.statuses[1]?.root_thread_ts, '500.1');
-  assert.equal(overridePublisher.posted.length, 0);
+  await gateway.handleMessageEvent({
+    team_id: 'T1',
+    channel_id: 'D1',
+    user_id: 'U1',
+    text: 'second',
+    ts: '500.3',
+    thread_ts: '500.1',
+    channel_type: 'im',
+  });
+
+  assert.equal(publisher.posted.at(-1)?.root_thread_ts, '500.3');
+  assert.equal(publisher.posted.at(-1)?.text, 'done:second');
 
   await worker.close();
   repository.close();
