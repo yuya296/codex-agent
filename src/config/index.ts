@@ -8,6 +8,7 @@ export interface AppConfig {
   slackAppToken: string;
   codexHome: string;
   sqlitePath: string;
+  slackAgentChatStatusEnabled: boolean;
   workerCommand: string;
   workerArgs: string[];
   workerCwd?: string;
@@ -27,6 +28,7 @@ interface ConfigToml {
   };
   app?: {
     sqlite_path?: unknown;
+    slack_agent_chat_status_enabled?: unknown;
     port?: unknown;
   };
 }
@@ -54,6 +56,11 @@ export function loadConfigFromToml(filePath = DEFAULT_CONFIG_PATH): AppConfig {
   const workerArgs = parseWorkerArgs(parsed.codex?.worker_args);
   const workerCwd = readOptionalString(parsed.codex?.worker_cwd, 'codex.worker_cwd');
   const sqlitePath = expandHome(readRequiredString(parsed.app?.sqlite_path, 'app.sqlite_path'));
+  const slackAgentChatStatusEnabled = parseOptionalBoolean(
+    parsed.app?.slack_agent_chat_status_enabled,
+    'app.slack_agent_chat_status_enabled',
+    false,
+  );
   const port = parsePort(parsed.app?.port);
 
   return {
@@ -61,6 +68,7 @@ export function loadConfigFromToml(filePath = DEFAULT_CONFIG_PATH): AppConfig {
     slackAppToken,
     codexHome,
     sqlitePath,
+    slackAgentChatStatusEnabled,
     workerCommand,
     workerArgs,
     workerCwd: workerCwd ? expandHome(workerCwd) : undefined,
@@ -104,6 +112,18 @@ function parsePort(value: unknown): number | undefined {
 
   if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
     throw new Error('app.port must be a positive integer when provided');
+  }
+
+  return value;
+}
+
+function parseOptionalBoolean(value: unknown, fieldName: string, defaultValue: boolean): boolean {
+  if (value === undefined || value === null) {
+    return defaultValue;
+  }
+
+  if (typeof value !== 'boolean') {
+    throw new Error(`${fieldName} must be boolean when provided`);
   }
 
   return value;

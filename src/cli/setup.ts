@@ -68,6 +68,12 @@ async function runSetup(): Promise<void> {
         validate: (value: string) => validateRequiredText(value, 'CODEX_WORKER_ARGS'),
       },
       {
+        type: 'confirm',
+        name: 'slackAgentChatStatusEnabled',
+        message: 'SLACK_AGENT_CHAT_STATUS_ENABLED',
+        initial: false,
+      },
+      {
         type: 'text',
         name: 'workerCwd',
         message: 'CODEX_WORKER_CWD (optional)',
@@ -104,6 +110,7 @@ async function runSetup(): Promise<void> {
     codexHome: answers.codexHome,
     workerCommand: answers.workerCommand,
     workerArgsText: answers.workerArgsText,
+    slackAgentChatStatusEnabled: answers.slackAgentChatStatusEnabled,
     workerCwd: answers.workerCwd,
     sqlitePath: answers.sqlitePath,
     portText: answers.portText,

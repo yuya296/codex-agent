@@ -29,13 +29,14 @@ npm run setup
 `setup` は以下を対話入力し、`~/.config/codex-agent/config.toml` に保存します。
 
 - 必須: `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `CODEX_HOME`, `CODEX_WORKER_COMMAND`, `CODEX_WORKER_ARGS`, `SQLITE_PATH`
-- 任意: `CODEX_WORKER_CWD`, `PORT`
+- 任意: `SLACK_AGENT_CHAT_STATUS_ENABLED`, `CODEX_WORKER_CWD`, `PORT`
 
 デフォルト値:
 
 - `CODEX_WORKER_COMMAND`: `codex`
 - `CODEX_WORKER_ARGS`: `app-server`
 - `CODEX_HOME`: `$CODEX_HOME` があればそれ、なければ `~/.codex`
+- `SLACK_AGENT_CHAT_STATUS_ENABLED`: `false`
 - `SQLITE_PATH`: `./data/app.sqlite`
 
 保存時の挙動:
@@ -46,6 +47,12 @@ npm run setup
 
 Slack App 側の具体的な設定は以下を参照してください。  
 [Slack API 設定ガイド](./docs/slack-api-setup.md)
+
+必要な権限の要点:
+
+- App-Level Token scope: `connections:write`
+- Bot Token Scopes: `chat:write`, `im:history`
+- Event Subscription: `message.im`
 
 ## 起動前チェック
 
@@ -95,8 +102,11 @@ worker_args = ["app-server"]
 
 [app]
 sqlite_path = "./data/app.sqlite"
+slack_agent_chat_status_enabled = false
 # port = 3000 # optional
 ```
+
+`slack_agent_chat_status_enabled = true` にすると、進捗通知に `assistant.threads.setStatus` を使います。通常の DM 運用や未対応 token の環境では `false` のまま使ってください。
 
 ## npm scripts
 

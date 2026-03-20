@@ -30,6 +30,9 @@ export function createBoltGatewayRuntime(
       text?: string;
       ts: string;
       thread_ts?: string;
+      assistant_thread?: {
+        thread_ts?: string;
+      };
       channel_type?: 'im' | 'channel' | 'group' | 'mpim';
       subtype?: string;
     };
@@ -45,6 +48,7 @@ export function createBoltGatewayRuntime(
       text: messageEvent.text,
       ts: messageEvent.ts,
       thread_ts: messageEvent.thread_ts,
+      assistant_thread: messageEvent.assistant_thread,
       channel_type: messageEvent.channel_type,
       subtype: messageEvent.subtype,
     });

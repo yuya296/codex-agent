@@ -25,6 +25,7 @@ test('loadConfigFromToml: reads config and expands home paths', () => {
       '',
       '[app]',
       'sqlite_path = "~/data/app.sqlite"',
+      'slack_agent_chat_status_enabled = true',
       'port = 3000',
       '',
     ].join('\n'),
@@ -37,6 +38,7 @@ test('loadConfigFromToml: reads config and expands home paths', () => {
   assert.deepEqual(loaded.workerArgs, ['app-server', '--listen', 'stdio://']);
   assert.equal(loaded.workerCwd, join(homedir(), 'workspace'));
   assert.equal(loaded.sqlitePath, join(homedir(), 'data', 'app.sqlite'));
+  assert.equal(loaded.slackAgentChatStatusEnabled, true);
   assert.equal(loaded.port, 3000);
 
   cleanupDir(tempDir);
@@ -66,6 +68,7 @@ test('loadConfigFromToml: accepts worker_args as string and splits it', () => {
 
   const loaded = loadConfigFromToml(configPath);
   assert.deepEqual(loaded.workerArgs, ['app-server', '--listen', 'stdio://']);
+  assert.equal(loaded.slackAgentChatStatusEnabled, false);
 
   cleanupDir(tempDir);
 });

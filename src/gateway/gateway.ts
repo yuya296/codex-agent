@@ -14,6 +14,11 @@ export interface SlackPublisher {
     text: string;
     blocks?: unknown[];
   }): Promise<void>;
+  setThreadStatus(input: {
+    channel_id: string;
+    root_thread_ts: string;
+    status: string;
+  }): Promise<void>;
 }
 
 export interface SlackMessageEvent {
@@ -23,6 +28,9 @@ export interface SlackMessageEvent {
   text: string;
   ts: string;
   thread_ts?: string;
+  assistant_thread?: {
+    thread_ts?: string;
+  };
   channel_type: 'im' | 'channel' | 'group' | 'mpim';
   subtype?: string;
 }
@@ -46,11 +54,13 @@ export class Gateway implements GatewayNotifier {
       return;
     }
 
-    if (!event.thread_ts || event.thread_ts === event.ts) {
+    const rootThreadTs = event.assistant_thread?.thread_ts ?? event.thread_ts ?? event.ts;
+
+    if (rootThreadTs === event.ts) {
       const input: StartSessionInput = {
         slack_team_id: event.team_id,
         slack_channel_id: event.channel_id,
-        slack_root_thread_ts: event.ts,
+        slack_root_thread_ts: rootThreadTs,
         user_id: event.user_id,
         text: event.text,
       };
@@ -61,7 +71,7 @@ export class Gateway implements GatewayNotifier {
     const input: ContinueSessionInput = {
       slack_team_id: event.team_id,
       slack_channel_id: event.channel_id,
-      slack_root_thread_ts: event.thread_ts,
+      slack_root_thread_ts: rootThreadTs,
       user_id: event.user_id,
       text: event.text,
     };
@@ -81,10 +91,10 @@ export class Gateway implements GatewayNotifier {
   }
 
   public async notifyProgress(session: Session, message: string): Promise<void> {
-    await this.publisher.postThreadMessage({
+    await this.publisher.setThreadStatus({
       channel_id: session.slack_channel_id,
       root_thread_ts: session.slack_root_thread_ts,
-      text: message,
+      status: message,
     });
   }
 

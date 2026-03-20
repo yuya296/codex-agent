@@ -34,6 +34,22 @@ async function main(): Promise<void> {
           blocks: blocks as any,
         });
       },
+      setThreadStatus: async ({ channel_id, root_thread_ts, status }) => {
+        if (!config.slackAgentChatStatusEnabled) {
+          await runtime.app.client.chat.postMessage({
+            channel: channel_id,
+            thread_ts: root_thread_ts,
+            text: status,
+          });
+          return;
+        }
+
+        await runtime.app.client.assistant.threads.setStatus({
+          channel_id,
+          thread_ts: root_thread_ts,
+          status,
+        });
+      },
     })),
     {
       botToken: config.slackBotToken,

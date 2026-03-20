@@ -8,6 +8,7 @@ export interface SetupInput {
   codexHome: string;
   workerCommand: string;
   workerArgsText: string;
+  slackAgentChatStatusEnabled?: boolean;
   workerCwd?: string;
   sqlitePath: string;
   portText?: string;
@@ -26,6 +27,7 @@ export interface SetupConfigToml {
   };
   app: {
     sqlite_path: string;
+    slack_agent_chat_status_enabled: boolean;
     port?: number;
   };
 }
@@ -46,6 +48,7 @@ export function buildSetupConfig(input: SetupInput): SetupConfigToml {
     },
     app: {
       sqlite_path: input.sqlitePath,
+      slack_agent_chat_status_enabled: input.slackAgentChatStatusEnabled ?? false,
       port,
     },
   };

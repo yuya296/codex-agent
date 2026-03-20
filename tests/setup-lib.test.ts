@@ -36,6 +36,7 @@ test('setup-lib: build config should normalize optional fields', () => {
     codexHome: '/tmp/.codex',
     workerCommand: 'codex',
     workerArgsText: 'app-server --listen stdio://',
+    slackAgentChatStatusEnabled: true,
     workerCwd: '   ',
     sqlitePath: './data/app.sqlite',
     portText: '3000',
@@ -43,6 +44,7 @@ test('setup-lib: build config should normalize optional fields', () => {
 
   assert.deepEqual(config.codex.worker_args, ['app-server', '--listen', 'stdio://']);
   assert.equal(config.codex.worker_cwd, undefined);
+  assert.equal(config.app.slack_agent_chat_status_enabled, true);
   assert.equal(config.app.port, 3000);
 });
 
@@ -59,6 +61,7 @@ test('setup-lib: writeConfigToml should persist with mode 0600', () => {
     },
     app: {
       sqlite_path: './data/app.sqlite',
+      slack_agent_chat_status_enabled: false,
     },
   });
 
