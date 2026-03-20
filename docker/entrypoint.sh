@@ -9,7 +9,7 @@ require_env() {
   fi
 }
 
-mkdir -p "${CODEX_HOME:-/codex-home}"
+mkdir -p "${CODEX_HOME:-/root/.codex}"
 mkdir -p "${PLAYWRIGHT_AGENT_PROFILE_DIR:-/profiles/agent}"
 mkdir -p "$(dirname "${SQLITE_PATH:-/data/app.sqlite}")"
 mkdir -p /run/playwright

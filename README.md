@@ -98,6 +98,7 @@ Docker では次を使います。
 - Codex 認証: `./.docker/codex-home`
 - Playwright profile: `./.docker/playwright-agent-profile`
 - SQLite: `./.docker/data/app.sqlite`
+- app / worker の作業ディレクトリ: `/app`
 
 詳細は [docs/docker.md](/Users/yuya/dev/codex-agent/docs/docker.md) を参照してください。
 
@@ -112,6 +113,7 @@ npm run dev
 - アプリ本体は環境変数をそのまま読みます
 - Docker Compose は `.env` を読めますが、ローカル実行時に `.env` を自動ロードはしません
 - 起動時に `CODEX_HOME` の値が worker プロセスにも渡されます
+- Docker は host repo を bind mount しないので、コード変更反映には再 build が必要です
 
 ## 環境変数
 
@@ -121,10 +123,10 @@ SLACK_APP_TOKEN=xapp-...
 DEBUG_SLACK_EVENTS=false
 DEBUG_WORKER_EVENTS=false
 DEBUG_WORKER_EVENT_DELTAS=false
-CODEX_HOME=~/.codex
+CODEX_HOME=/root/.codex
 CODEX_WORKER_COMMAND=codex
 CODEX_WORKER_ARGS="app-server"
-CODEX_WORKER_CWD=
+CODEX_WORKER_CWD=/app
 WORKER_STREAM_EVENT_TIMEOUT_MS=300000
 SQLITE_PATH=./data/app.sqlite
 SLACK_AGENT_CHAT_STATUS_ENABLED=false

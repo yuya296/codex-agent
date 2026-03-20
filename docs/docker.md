@@ -5,7 +5,7 @@
 `codex-agent` を Docker Compose で起動できます。  
 Slack token は外部環境変数から渡し、container 側の Codex 認証は host の通常 `.codex` と分離して `./.docker/codex-home` に保持します。
 
-app 自体は image 内の `/app` で動作し、host の project は `/workspace` に bind mount されます。Codex worker の作業対象は `/workspace` です。base image は `node:24-trixie` を使い、browser は Debian package の `chromium` を入れています。
+app 自体は image 内の `/app` で動作し、Codex worker の作業対象も `/app` です。host の repo は container に bind mount しません。コード変更を反映するには再 build が必要です。base image は `node:24-trixie` を使い、browser は Debian package の `chromium` を入れています。
 
 ## 前提
 
@@ -34,10 +34,10 @@ app 自体は image 内の `/app` で動作し、host の project は `/workspac
 - `DEBUG_SLACK_EVENTS` default: `false`
 - `DEBUG_WORKER_EVENTS` default: `false`
 - `DEBUG_WORKER_EVENT_DELTAS` default: `false`
-- `CODEX_HOME` default: `/codex-home`
+- `CODEX_HOME` default: `/root/.codex`
 - `CODEX_WORKER_COMMAND` default: `codex`
 - `CODEX_WORKER_ARGS` default: `app-server`
-- `CODEX_WORKER_CWD` default: `/workspace`
+- `CODEX_WORKER_CWD` default: `/app`
 - `WORKER_STREAM_EVENT_TIMEOUT_MS` default: `300000`
 - `SQLITE_PATH` default: `/data/app.sqlite`
 - `PORT`
@@ -73,6 +73,12 @@ docker compose exec app codex login --device-auth
 - Docker では browser callback の `localhost` が container 側になるため、通常の `codex login` より `--device-auth` を標準手順にします
 - API key を使う場合は `codex login --with-api-key` でも構いません
 
+container 内確認:
+
+```bash
+docker compose exec app sh -lc 'echo $CODEX_HOME && echo $CODEX_WORKER_CWD'
+```
+
 ## timeout / hang 切り分け
 
 `worker execution failed: Error: timed out waiting for worker stream event (300000ms)` が出る場合は、まず `DEBUG_WORKER_EVENTS=true` で最後の worker event を確認してください。通常は高頻度 delta を抑制しているので、ログ量は大きくなりません。
@@ -97,5 +103,6 @@ profile は `PLAYWRIGHT_AGENT_PROFILE_DIR` に固定され、既定では host �
 ## 補足
 
 - app 設定は container 環境変数をそのまま使います
+- Docker は `/app` 固定の image 実行前提で、host repo を live mount しません
 - 今回は秘密情報隔離は最小対応です。worker への env allowlist までは入れていません
 - Playwright 公式 docs の推奨に合わせて `init: true` と `ipc: host` を compose に入れています
