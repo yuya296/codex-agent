@@ -60,7 +60,7 @@ test('worker client: approval request without explicit thread/turn ids still bec
     {
       type: 'approval_required',
       approval_id: 'approval-1',
-      prompt: 'need approval\n`/bin/bash -lc playwright-cli --version`',
+      prompt: 'need approval\n```\n/bin/bash -lc playwright-cli --version\n```',
     },
   ]);
 

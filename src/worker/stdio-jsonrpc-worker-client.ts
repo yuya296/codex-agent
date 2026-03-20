@@ -582,7 +582,7 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
     const command = this.readCommand(streamEvent.params.command);
 
     if (reason && command) {
-      return `${reason}\n\`${command}\``;
+      return `${reason}\n${this.formatCommandCodeBlock(command)}`;
     }
 
     if (reason) {
@@ -590,10 +590,14 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
     }
 
     if (command) {
-      return `Approval required for command:\n\`${command}\``;
+      return `Approval required for command:\n${this.formatCommandCodeBlock(command)}`;
     }
 
     return 'Approval required to continue.';
+  }
+
+  private formatCommandCodeBlock(command: string): string {
+    return `\`\`\`\n${command}\n\`\`\``;
   }
 
   private readCommand(value: unknown): string | null {
