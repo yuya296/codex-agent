@@ -1,3 +1,6 @@
+import { rm } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { extname } from 'node:path';
 import type {
   ApprovalDecision,
   ContinueSessionInput,
@@ -14,6 +17,14 @@ export interface SlackPublisher {
     root_thread_ts: string;
     text: string;
     blocks?: unknown[];
+  }): Promise<void>;
+  uploadThreadFiles(input: {
+    channel_id: string;
+    root_thread_ts: string;
+    files: Array<{
+      path: string;
+      alt_text?: string;
+    }>;
   }): Promise<void>;
   setThreadStatus(input: {
     channel_id: string;
@@ -36,6 +47,7 @@ export interface SlackMessageEvent {
   };
   channel_type: 'im' | 'channel' | 'group' | 'mpim';
   subtype?: string;
+  temporary_directory?: string;
 }
 
 export interface SlackApprovalAction {
@@ -48,6 +60,7 @@ export interface SlackApprovalAction {
 }
 
 const SLACK_LOADING_MESSAGE_MAX_LENGTH = 50;
+const LOCAL_IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp']);
 
 export class Gateway implements GatewayNotifier {
   public constructor(
@@ -56,33 +69,39 @@ export class Gateway implements GatewayNotifier {
   ) {}
 
   public async handleMessageEvent(event: SlackMessageEvent): Promise<void> {
-    if (event.channel_type !== 'im' || event.subtype) {
-      return;
-    }
+    try {
+      if (event.channel_type !== 'im' || (event.subtype && event.subtype !== 'file_share')) {
+        return;
+      }
 
-    const rootThreadTs =
-      event.assistant_thread?.thread_ts ??
-      (event.parent_user_id && event.thread_ts ? event.thread_ts : event.ts);
-    if (rootThreadTs === event.ts) {
-      const input: StartSessionInput = {
+      const rootThreadTs =
+        event.assistant_thread?.thread_ts ??
+        (event.parent_user_id && event.thread_ts ? event.thread_ts : event.ts);
+      if (rootThreadTs === event.ts) {
+        const input: StartSessionInput = {
+          slack_team_id: event.team_id,
+          slack_channel_id: event.channel_id,
+          slack_root_thread_ts: rootThreadTs,
+          user_id: event.user_id,
+          text: event.text,
+        };
+        await this.orchestrator.startSessionFromSlack(input);
+        return;
+      }
+
+      const input: ContinueSessionInput = {
         slack_team_id: event.team_id,
         slack_channel_id: event.channel_id,
         slack_root_thread_ts: rootThreadTs,
         user_id: event.user_id,
         text: event.text,
       };
-      await this.orchestrator.startSessionFromSlack(input);
-      return;
+      await this.orchestrator.continueSessionFromSlack(input);
+    } finally {
+      if (event.temporary_directory) {
+        await rm(event.temporary_directory, { recursive: true, force: true });
+      }
     }
-
-    const input: ContinueSessionInput = {
-      slack_team_id: event.team_id,
-      slack_channel_id: event.channel_id,
-      slack_root_thread_ts: rootThreadTs,
-      user_id: event.user_id,
-      text: event.text,
-    };
-    await this.orchestrator.continueSessionFromSlack(input);
   }
 
   public async handleApprovalAction(action: SlackApprovalAction): Promise<void> {
@@ -161,11 +180,23 @@ export class Gateway implements GatewayNotifier {
   }
 
   public async notifyCompleted(session: Session, message: string): Promise<void> {
-    await this.publisher.postThreadMessage({
-      channel_id: session.slack_channel_id,
-      root_thread_ts: session.slack_root_thread_ts,
-      text: toSlackMrkdwn(message),
-    });
+    const rendered = renderSlackCompletedMessage(message);
+
+    if (rendered.text.trim()) {
+      await this.publisher.postThreadMessage({
+        channel_id: session.slack_channel_id,
+        root_thread_ts: session.slack_root_thread_ts,
+        text: rendered.text,
+      });
+    }
+
+    if (rendered.images.length > 0) {
+      await this.publisher.uploadThreadFiles({
+        channel_id: session.slack_channel_id,
+        root_thread_ts: session.slack_root_thread_ts,
+        files: rendered.images,
+      });
+    }
   }
 
   public async notifyFailed(session: Session, message: string): Promise<void> {
@@ -187,5 +218,96 @@ export function toSlackLoadingMessage(message: string): string {
 }
 
 export function toSlackMrkdwn(message: string): string {
-  return markdownToSlack(message);
+  return normalizeSlackMrkdwnLists(markdownToSlack(message));
+}
+
+export function renderSlackCompletedMessage(message: string): {
+  text: string;
+  images: Array<{ path: string; alt_text?: string }>;
+} {
+  const extracted = extractLocalImageFiles(message);
+  const renderedText = toSlackMrkdwn(extracted.text).trim();
+
+  return {
+    text: renderedText || (extracted.images.length === 0 ? message : ''),
+    images: extracted.images,
+  };
+}
+
+export function extractLocalImageFiles(message: string): {
+  text: string;
+  images: Array<{ path: string; alt_text?: string }>;
+} {
+  const images = new Map<string, { path: string; alt_text?: string }>();
+  let text = message;
+
+  text = text.replace(/!\[([^\]]*)\]\((\/[^)\s]+\.(?:png|jpe?g|gif|webp))\)/giu, (match, alt, path) => {
+    registerLocalImage(images, path, alt);
+    return '';
+  });
+
+  text = text.replace(/(^|[\s(])((\/[^\s)]+?\.(?:png|jpe?g|gif|webp)))(?=$|[\s),.;!?])/giu, (match, prefix, path) => {
+    registerLocalImage(images, path);
+    return prefix;
+  });
+
+  return {
+    text: cleanupExtractedMessage(text),
+    images: [...images.values()],
+  };
+}
+
+function registerLocalImage(
+  images: Map<string, { path: string; alt_text?: string }>,
+  candidatePath: string,
+  altText?: string,
+): void {
+  const normalizedPath = candidatePath.trim();
+  const extension = extname(normalizedPath).toLowerCase();
+  if (!LOCAL_IMAGE_EXTENSIONS.has(extension) || !existsSync(normalizedPath)) {
+    return;
+  }
+
+  const existing = images.get(normalizedPath);
+  if (existing) {
+    if (!existing.alt_text && altText?.trim()) {
+      existing.alt_text = altText.trim();
+    }
+    return;
+  }
+
+  images.set(normalizedPath, {
+    path: normalizedPath,
+    alt_text: altText?.trim() || undefined,
+  });
+}
+
+function cleanupExtractedMessage(text: string): string {
+  return text
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .join('\n')
+    .trim();
+}
+
+function normalizeSlackMrkdwnLists(text: string): string {
+  const lines = text.split('\n');
+  let inCodeBlock = false;
+
+  return lines
+    .map((line) => {
+      if (line.trimStart().startsWith('```')) {
+        inCodeBlock = !inCodeBlock;
+        return line;
+      }
+
+      if (inCodeBlock) {
+        return line;
+      }
+
+      return line.replace(/^(\s*)-\s+/u, '$1• ');
+    })
+    .join('\n');
 }

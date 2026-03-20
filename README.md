@@ -61,7 +61,7 @@ export SLACK_APP_TOKEN='xapp-...'
 必要な権限の要点:
 
 - App-Level Token scope: `connections:write`
-- Bot Token Scopes: `chat:write`, `im:history`
+- Bot Token Scopes: `chat:write`, `im:history`, `files:write`, `files:read`
 - Event Subscription: `message.im`
 - `Agents & AI Apps`: ON
 - `Agent or Assistant`: OFF
@@ -139,7 +139,7 @@ PORT=
 
 `SLACK_AGENT_CHAT_STATUS_ENABLED=true` にすると、進捗通知に `assistant.threads.setStatus` を使います。classic な DM スレッド返信を維持したい場合は、Slack App 側の `Agent or Assistant` は OFF にしてください。
 
-通常回答の completed メッセージは、送信直前に Markdown から Slack の mrkdwn へ変換します。変換は `md-to-slack` 準拠で、見出しや画像はライブラリ仕様で落ちます。approval と status は今回の変換対象外です。
+通常回答の completed メッセージは、送信直前に Markdown から Slack の mrkdwn へ変換します。箇条書きの `- ` は Slack 向けに `• ` へ寄せます。ローカル画像パス（`/tmp/...png` など）が含まれる場合は、本文から取り除いたうえで thread にファイル添付します。Slack で受け取った画像添付は bot token の `files:read` で download し、一時ファイルのパスを worker に渡します。approval と status は今回の変換対象外です。
 
 `WORKER_STREAM_EVENT_TIMEOUT_MS` は worker の turn 内で無通信を許容する最大時間です。重い処理で 5 分が短い場合だけ伸ばしてください。
 

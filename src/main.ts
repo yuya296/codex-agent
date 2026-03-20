@@ -1,3 +1,4 @@
+import { basename } from 'node:path';
 import { createBoltGatewayRuntime } from './gateway/bolt.js';
 import { Gateway } from './gateway/gateway.js';
 import { Orchestrator } from './orchestrator/orchestrator.js';
@@ -47,6 +48,22 @@ async function main(): Promise<void> {
           text,
           blocks: blocks as any,
         });
+      },
+      uploadThreadFiles: async ({ channel_id, root_thread_ts, files }) => {
+        for (const file of files) {
+          logSlackClient('filesUploadV2', {
+            channel_id,
+            root_thread_ts,
+            path: file.path,
+          });
+          await runtime.app.client.filesUploadV2({
+            channel_id,
+            thread_ts: root_thread_ts,
+            file: file.path,
+            filename: basename(file.path),
+            alt_text: file.alt_text,
+          });
+        }
       },
       setThreadStatus: async ({ channel_id, root_thread_ts, status, loading_messages }) => {
         if (!config.slackAgentChatStatusEnabled) {

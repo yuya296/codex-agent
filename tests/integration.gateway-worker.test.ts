@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Gateway, type SlackPublisher } from '../src/gateway/gateway.js';
@@ -21,6 +22,11 @@ class InMemorySlackPublisher implements SlackPublisher {
     status: string;
     loading_messages?: string[];
   }> = [];
+  public readonly uploads: Array<{
+    channel_id: string;
+    root_thread_ts: string;
+    files: Array<{ path: string; alt_text?: string }>;
+  }> = [];
 
   public async postThreadMessage(input: {
     channel_id: string;
@@ -38,6 +44,14 @@ class InMemorySlackPublisher implements SlackPublisher {
     loading_messages?: string[];
   }): Promise<void> {
     this.statuses.push(input);
+  }
+
+  public async uploadThreadFiles(input: {
+    channel_id: string;
+    root_thread_ts: string;
+    files: Array<{ path: string; alt_text?: string }>;
+  }): Promise<void> {
+    this.uploads.push(input);
   }
 }
 
@@ -267,6 +281,51 @@ test('integration: completed markdown is converted to mrkdwn before posting', as
   assert.equal(publisher.posted[0]?.text.includes('# Heading'), false);
   assert.match(publisher.posted[0]?.text ?? '', /\*bold\*/);
   assert.match(publisher.posted[0]?.text ?? '', /<https:\/\/example\.com\|example>/);
+  assert.match(publisher.posted[0]?.text ?? '', /• \*bold\* item/);
+  assert.equal(publisher.uploads.length, 0);
+
+  await worker.close();
+  repository.close();
+  cleanupDir(tempDir);
+});
+
+test('integration: completed local image path is uploaded to slack thread', async () => {
+  const tempDir = createTempDir();
+  const repository = new SessionRepository(join(tempDir, 'app.sqlite'));
+  const worker = new StdioJsonRpcWorkerClient(process.execPath, [fixturePath()]);
+  const publisher = new InMemorySlackPublisher();
+
+  let gateway!: Gateway;
+  const orchestrator = new Orchestrator(repository, worker, {
+    notifyProgress: async (session, message) => gateway.notifyProgress(session, message),
+    notifyApproval: async (session, approval) => gateway.notifyApproval(session, approval),
+    notifyCompleted: async (session, message) => gateway.notifyCompleted(session, message),
+    notifyFailed: async (session, message) => gateway.notifyFailed(session, message),
+  });
+  gateway = new Gateway(orchestrator, publisher);
+
+  const imagePath = join(tempDir, 'weather.png');
+  writeFileSync(imagePath, 'image');
+
+  await gateway.notifyCompleted(
+    {
+      session_id: 'S1',
+      slack_team_id: 'T1',
+      slack_channel_id: 'D1',
+      slack_root_thread_ts: '500.1',
+      codex_thread_id: 'thread-1',
+      state: 'idle',
+      pending_approval_id: null,
+      created_at: '2026-03-20T00:00:00.000Z',
+      updated_at: '2026-03-20T00:00:00.000Z',
+    },
+    `画像です: ${imagePath}`,
+  );
+
+  assert.equal(publisher.posted.length, 1);
+  assert.equal(publisher.posted[0]?.text.includes(imagePath), false);
+  assert.equal(publisher.uploads.length, 1);
+  assert.equal(publisher.uploads[0]?.files[0]?.path, imagePath);
 
   await worker.close();
   repository.close();

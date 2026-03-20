@@ -8,7 +8,7 @@ classic な DM スレッド返信を維持しつつ loading status を使う前�
 ## 必要な権限と設定
 
 - App-Level Token scope: `connections:write`
-- Bot Token Scopes: `chat:write`, `im:history`
+- Bot Token Scopes: `chat:write`, `im:history`, `files:write`, `files:read`
 - Event Subscriptions: `message.im`
 - Required features: `Socket Mode`, `Interactivity & Shortcuts`, `Agents & AI Apps`, `App Home` のメッセージ送信許可
 
@@ -55,6 +55,8 @@ Slack で「このアプリへのメッセージ送信はオフにされてい�
 
 - `chat:write`（Bot がスレッド返信し、AgentChat status 更新にも使う）
 - `im:history`（DM の `message.im` イベントを購読するため）
+- `files:write`（ローカル画像を thread に添付アップロードするため）
+- `files:read`（Slack で受け取った画像添付を download して worker に渡すため）
 
 補足:
 

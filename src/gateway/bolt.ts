@@ -1,3 +1,6 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { basename, extname, join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { App } from '@slack/bolt';
 import { Gateway, type SlackApprovalAction, type SlackMessageEvent } from './gateway.js';
 
@@ -25,9 +28,17 @@ interface RawSlackMessageEvent {
   };
   channel_type?: 'im' | 'channel' | 'group' | 'mpim';
   subtype?: string;
+  files?: Array<{
+    id?: string;
+    name?: string;
+    mimetype?: string;
+    url_private?: string;
+    url_private_download?: string;
+  }>;
 }
 
 const debugSlackEvents = process.env.DEBUG_SLACK_EVENTS === 'true';
+const DOWNLOADABLE_IMAGE_MIME_PREFIX = 'image/';
 
 export function createBoltGatewayRuntime(
   gateway: Gateway,
@@ -40,7 +51,7 @@ export function createBoltGatewayRuntime(
   });
 
   app.event('message', async ({ event }) => {
-    const messageEvent = toSlackMessageEvent(event as RawSlackMessageEvent);
+    const messageEvent = await buildSlackMessageEvent(event as RawSlackMessageEvent, config.botToken);
     logSlackEvent('message', event as RawSlackMessageEvent);
     if (!messageEvent) {
       return;
@@ -96,7 +107,7 @@ export function createBoltGatewayRuntime(
 }
 
 export function toSlackMessageEvent(event: RawSlackMessageEvent): SlackMessageEvent | null {
-  if (!event.team || !event.user || !event.text || !event.channel_type) {
+  if (!event.team || !event.user || !event.channel_type) {
     return null;
   }
 
@@ -104,13 +115,30 @@ export function toSlackMessageEvent(event: RawSlackMessageEvent): SlackMessageEv
     team_id: event.team,
     channel_id: event.channel,
     user_id: event.user,
-    text: event.text,
+    text: event.text ?? '',
     ts: event.ts,
     thread_ts: event.thread_ts,
     parent_user_id: event.parent_user_id,
     assistant_thread: event.assistant_thread,
     channel_type: event.channel_type,
     subtype: event.subtype,
+  };
+}
+
+export async function buildSlackMessageEvent(
+  event: RawSlackMessageEvent,
+  botToken: string,
+): Promise<SlackMessageEvent | null> {
+  const baseEvent = toSlackMessageEvent(event);
+  if (!baseEvent) {
+    return null;
+  }
+
+  const downloaded = await downloadSlackImageFiles(event.files, botToken);
+  return {
+    ...baseEvent,
+    text: appendDownloadedImagesToText(baseEvent.text, downloaded.files),
+    temporary_directory: downloaded.directory,
   };
 }
 
@@ -155,6 +183,106 @@ export function readApprovalPrompt(body: any, fallback?: string): string {
   return 'Approval required to continue.';
 }
 
+export function appendDownloadedImagesToText(
+  text: string,
+  files: Array<{ path: string; name?: string; mimetype?: string }>,
+): string {
+  if (files.length === 0) {
+    return text;
+  }
+
+  const attachmentLines = files.map((file) => {
+    const label = file.name ? `${file.name}: ` : '';
+    return `- ${label}${file.path}`;
+  });
+
+  const attachmentSection = ['添付画像:', ...attachmentLines].join('\n');
+  return [text.trim(), attachmentSection].filter(Boolean).join('\n\n');
+}
+
+async function downloadSlackImageFiles(
+  files: RawSlackMessageEvent['files'],
+  botToken: string,
+): Promise<{
+  directory?: string;
+  files: Array<{ path: string; name?: string; mimetype?: string }>;
+}> {
+  if (!Array.isArray(files) || files.length === 0) {
+    return { files: [] };
+  }
+
+  const imageFiles = files.filter((file) => isDownloadableImageFile(file));
+  if (imageFiles.length === 0) {
+    return { files: [] };
+  }
+
+  const directory = await mkdtemp(join(tmpdir(), 'codex-agent-slack-files-'));
+  const downloaded: Array<{ path: string; name?: string; mimetype?: string }> = [];
+
+  for (const file of imageFiles) {
+    const sourceUrl = file.url_private_download ?? file.url_private;
+    if (!sourceUrl) {
+      continue;
+    }
+
+    const response = await fetch(sourceUrl, {
+      headers: {
+        Authorization: `Bearer ${botToken}`,
+      },
+    });
+    if (!response.ok) {
+      continue;
+    }
+
+    const fileName = sanitizeDownloadedFileName(file.name, file.mimetype);
+    const targetPath = join(directory, fileName);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    await writeFile(targetPath, bytes);
+    downloaded.push({
+      path: targetPath,
+      name: file.name,
+      mimetype: file.mimetype,
+    });
+  }
+
+  if (downloaded.length === 0) {
+    await rm(directory, { recursive: true, force: true });
+    return { files: [] };
+  }
+
+  return { directory, files: downloaded };
+}
+
+function isDownloadableImageFile(file: NonNullable<RawSlackMessageEvent['files']>[number]): boolean {
+  return typeof file.mimetype === 'string' && file.mimetype.startsWith(DOWNLOADABLE_IMAGE_MIME_PREFIX);
+}
+
+function sanitizeDownloadedFileName(name?: string, mimetype?: string): string {
+  const baseName = (name && basename(name).replace(/[^a-zA-Z0-9._-]/g, '_')) || 'attachment';
+  if (extname(baseName)) {
+    return baseName;
+  }
+
+  const fallbackExtension = mimeTypeToExtension(mimetype);
+  return `${baseName}${fallbackExtension}`;
+}
+
+function mimeTypeToExtension(mimetype?: string): string {
+  if (mimetype === 'image/jpeg') {
+    return '.jpg';
+  }
+  if (mimetype === 'image/png') {
+    return '.png';
+  }
+  if (mimetype === 'image/gif') {
+    return '.gif';
+  }
+  if (mimetype === 'image/webp') {
+    return '.webp';
+  }
+  return '';
+}
+
 function logSlackEvent(type: string, event: RawSlackMessageEvent): void {
   if (!debugSlackEvents) {
     return;
@@ -175,6 +303,7 @@ function logSlackEvent(type: string, event: RawSlackMessageEvent): void {
       channel_type: event.channel_type ?? null,
       subtype: event.subtype ?? null,
       has_text: Boolean(event.text),
+      files_count: event.files?.length ?? 0,
     }),
   );
 }
