@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Gateway, toSlackLoadingMessage, type SlackPublisher } from '../src/gateway/gateway.js';
+import {
+  Gateway,
+  toSlackLoadingMessage,
+  toSlackMrkdwn,
+  type SlackPublisher,
+} from '../src/gateway/gateway.js';
 
 function createSession() {
   return {
@@ -36,4 +41,45 @@ test('notifyProgress: status update failure does not throw', async () => {
   const gateway = new Gateway({} as any, publisher);
 
   await assert.doesNotReject(() => gateway.notifyProgress(createSession(), 'long progress message'));
+});
+
+test('toSlackMrkdwn: converts markdown to mrkdwn using md-to-slack behavior', () => {
+  const converted = toSlackMrkdwn(
+    [
+      '# Heading',
+      '',
+      '- **bold** item',
+      '- [example](https://example.com)',
+      '',
+      '```ts',
+      'const value = 1;',
+      '```',
+    ].join('\n'),
+  );
+
+  assert.equal(converted.includes('# Heading'), false);
+  assert.match(converted, /\*bold\*/);
+  assert.match(converted, /<https:\/\/example\.com\|example>/);
+  assert.match(converted, /```/);
+});
+
+test('notifyCompleted: converts markdown before posting thread message', async () => {
+  const posted: Array<{ text: string }> = [];
+  const publisher: SlackPublisher = {
+    postThreadMessage: async (input) => {
+      posted.push({ text: input.text });
+    },
+    setThreadStatus: async () => {},
+  };
+  const gateway = new Gateway({} as any, publisher);
+
+  await gateway.notifyCompleted(
+    createSession(),
+    ['# Heading', '', '- **bold** item', '- [example](https://example.com)'].join('\n'),
+  );
+
+  assert.equal(posted.length, 1);
+  assert.equal(posted[0]?.text.includes('# Heading'), false);
+  assert.match(posted[0]?.text ?? '', /\*bold\*/);
+  assert.match(posted[0]?.text ?? '', /<https:\/\/example\.com\|example>/);
 });

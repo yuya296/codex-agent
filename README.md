@@ -50,9 +50,13 @@ export SLACK_APP_TOKEN='xapp-...'
 - `SLACK_AGENT_CHAT_STATUS_ENABLED`: `false`
 - `SQLITE_PATH`: `./data/app.sqlite`
 
-Slack App 側の具体的な設定は以下を参照してください。  
-[Slack API 設定ガイド](./docs/slack-api-setup.md)
-[Docker 運用ガイド](./docs/docker.md)
+## Docs
+
+- [仕様](./docs/spec.md)
+- [アーキテクチャ](./docs/architecture.md)
+- [図表](./docs/diagrams.md)
+- [Slack API 設定ガイド](./docs/slack-api-setup.md)
+- [Docker 運用ガイド](./docs/docker.md)
 
 必要な権限の要点:
 
@@ -134,6 +138,8 @@ PORT=
 ```
 
 `SLACK_AGENT_CHAT_STATUS_ENABLED=true` にすると、進捗通知に `assistant.threads.setStatus` を使います。classic な DM スレッド返信を維持したい場合は、Slack App 側の `Agent or Assistant` は OFF にしてください。
+
+通常回答の completed メッセージは、送信直前に Markdown から Slack の mrkdwn へ変換します。変換は `md-to-slack` 準拠で、見出しや画像はライブラリ仕様で落ちます。approval と status は今回の変換対象外です。
 
 `WORKER_STREAM_EVENT_TIMEOUT_MS` は worker の turn 内で無通信を許容する最大時間です。重い処理で 5 分が短い場合だけ伸ばしてください。
 

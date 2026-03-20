@@ -232,3 +232,43 @@ test('integration: dm message with inherited thread_ts but no parent_user_id sta
   repository.close();
   cleanupDir(tempDir);
 });
+
+test('integration: completed markdown is converted to mrkdwn before posting', async () => {
+  const tempDir = createTempDir();
+  const repository = new SessionRepository(join(tempDir, 'app.sqlite'));
+  const worker = new StdioJsonRpcWorkerClient(process.execPath, [fixturePath()]);
+  const publisher = new InMemorySlackPublisher();
+
+  let gateway!: Gateway;
+  const orchestrator = new Orchestrator(repository, worker, {
+    notifyProgress: async (session, message) => gateway.notifyProgress(session, message),
+    notifyApproval: async (session, approval) => gateway.notifyApproval(session, approval),
+    notifyCompleted: async (session, message) => gateway.notifyCompleted(session, message),
+    notifyFailed: async (session, message) => gateway.notifyFailed(session, message),
+  });
+  gateway = new Gateway(orchestrator, publisher);
+
+  await gateway.notifyCompleted(
+    {
+      session_id: 'S1',
+      slack_team_id: 'T1',
+      slack_channel_id: 'D1',
+      slack_root_thread_ts: '500.1',
+      codex_thread_id: 'thread-1',
+      state: 'idle',
+      pending_approval_id: null,
+      created_at: '2026-03-20T00:00:00.000Z',
+      updated_at: '2026-03-20T00:00:00.000Z',
+    },
+    ['# Heading', '', '- **bold** item', '- [example](https://example.com)'].join('\n'),
+  );
+
+  assert.equal(publisher.posted.length, 1);
+  assert.equal(publisher.posted[0]?.text.includes('# Heading'), false);
+  assert.match(publisher.posted[0]?.text ?? '', /\*bold\*/);
+  assert.match(publisher.posted[0]?.text ?? '', /<https:\/\/example\.com\|example>/);
+
+  await worker.close();
+  repository.close();
+  cleanupDir(tempDir);
+});

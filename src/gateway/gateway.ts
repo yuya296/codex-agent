@@ -6,6 +6,7 @@ import type {
   StartSessionInput,
 } from '../domain/types.js';
 import type { Orchestrator, GatewayNotifier } from '../orchestrator/orchestrator.js';
+import { markdownToSlack } from 'md-to-slack';
 
 export interface SlackPublisher {
   postThreadMessage(input: {
@@ -163,7 +164,7 @@ export class Gateway implements GatewayNotifier {
     await this.publisher.postThreadMessage({
       channel_id: session.slack_channel_id,
       root_thread_ts: session.slack_root_thread_ts,
-      text: message,
+      text: toSlackMrkdwn(message),
     });
   }
 
@@ -183,4 +184,8 @@ export function toSlackLoadingMessage(message: string): string {
   }
 
   return `${singleLine.slice(0, SLACK_LOADING_MESSAGE_MAX_LENGTH - 1).trimEnd()}…`;
+}
+
+export function toSlackMrkdwn(message: string): string {
+  return markdownToSlack(message);
 }
