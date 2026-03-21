@@ -491,7 +491,7 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
         if (status === 'failed') {
           const turnError = this.asRecord(turn.error);
           const errorMessage = this.asString(turnError.message) ?? 'turn failed';
-          out.push({ type: 'failed', error: errorMessage });
+          await this.emitWorkerEvent(out, { type: 'failed', error: errorMessage }, options);
           return out;
         }
 

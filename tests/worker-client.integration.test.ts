@@ -115,6 +115,30 @@ test('worker client: agentMessage delta emits streaming progress callbacks', asy
   await worker.close();
 });
 
+test('worker client: failed turn is emitted to streaming callbacks', async () => {
+  const worker = new StdioJsonRpcWorkerClient(process.execPath, [fixturePath()]);
+  const { codex_thread_id } = await worker.createThread();
+  const streamed: WorkerRunEvent[] = [];
+
+  const events = await worker.sendUserMessage(
+    {
+      codex_thread_id,
+      text: '[FAIL]',
+      user_id: 'U1',
+    },
+    {
+      onEvent: async (event) => {
+        streamed.push(event);
+      },
+    },
+  );
+
+  assert.deepEqual(streamed, [{ type: 'failed', error: 'mock-failure' }]);
+  assert.deepEqual(events, [{ type: 'failed', error: 'mock-failure' }]);
+
+  await worker.close();
+});
+
 test('worker client: non-fatal error notification does not fail a completed turn', async () => {
   const worker = new StdioJsonRpcWorkerClient(process.execPath, [fixturePath()]);
   const { codex_thread_id } = await worker.createThread();

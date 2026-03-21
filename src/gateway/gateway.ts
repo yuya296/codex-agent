@@ -142,6 +142,16 @@ export class Gateway implements GatewayNotifier {
     } catch (error) {
       // eslint-disable-next-line no-console
       console.error(`[slack:status-error] ${String(error)}`);
+      try {
+        await this.publisher.postThreadMessage({
+          channel_id: session.slack_channel_id,
+          root_thread_ts: session.slack_root_thread_ts,
+          text: loadingMessage,
+        });
+      } catch (fallbackError) {
+        // eslint-disable-next-line no-console
+        console.error(`[slack:status-fallback-error] ${String(fallbackError)}`);
+      }
     }
   }
 

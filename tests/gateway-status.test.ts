@@ -36,9 +36,12 @@ test('toSlackLoadingMessage: collapses whitespace and truncates to 50 chars', ()
   assert.match(loading, /…$/);
 });
 
-test('notifyProgress: status update failure does not throw', async () => {
+test('notifyProgress: status update failure falls back to thread message and does not throw', async () => {
+  const posted: Array<{ text: string }> = [];
   const publisher: SlackPublisher = {
-    postThreadMessage: async () => {},
+    postThreadMessage: async (input) => {
+      posted.push({ text: input.text });
+    },
     uploadThreadFiles: async () => {},
     setThreadStatus: async () => {
       throw new Error('invalid_arguments');
@@ -47,6 +50,7 @@ test('notifyProgress: status update failure does not throw', async () => {
   const gateway = new Gateway({} as any, publisher);
 
   await assert.doesNotReject(() => gateway.notifyProgress(createSession(), 'long progress message'));
+  assert.deepEqual(posted, [{ text: 'long progress message' }]);
 });
 
 test('toSlackMrkdwn: preserves line structure and converts list/inline markdown for Slack', () => {

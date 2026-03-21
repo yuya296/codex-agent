@@ -121,11 +121,7 @@ function parseOptionalBoolean(value: unknown, fieldName: string, defaultValue: b
     }
   }
 
-  if (typeof value !== 'boolean') {
-    throw new Error(`${fieldName} must be boolean when provided`);
-  }
-
-  return value;
+  throw new Error(`${fieldName} must be boolean when provided`);
 }
 
 function readRequiredString(value: unknown, fieldName: string): string {

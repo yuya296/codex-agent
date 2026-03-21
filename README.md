@@ -104,7 +104,7 @@ Docker では次を使います。
 - SQLite: `./.docker/data/app.sqlite`
 - app / worker の作業ディレクトリ: `/app`
 
-詳細は [docs/docker.md](/Users/yuya/dev/codex-agent/docs/docker.md) を参照してください。
+詳細は [docs/docker.md](./docs/docker.md) を参照してください。
 
 開発時:
 

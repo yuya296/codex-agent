@@ -46,3 +46,15 @@ test('loadConfigFromEnv: applies defaults for optional values', () => {
 test('loadConfigFromEnv: throws helpful message when required env is missing', () => {
   assert.throws(() => loadConfigFromEnv({}), /SLACK_BOT_TOKEN is required/);
 });
+
+test('loadConfigFromEnv: rejects invalid boolean env values', () => {
+  assert.throws(
+    () =>
+      loadConfigFromEnv({
+        SLACK_BOT_TOKEN: 'xoxb-test',
+        SLACK_APP_TOKEN: 'xapp-test',
+        SLACK_AGENT_CHAT_STATUS_ENABLED: 'yes',
+      }),
+    /SLACK_AGENT_CHAT_STATUS_ENABLED must be boolean when provided/,
+  );
+});
