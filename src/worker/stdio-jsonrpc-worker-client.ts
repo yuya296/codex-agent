@@ -420,61 +420,38 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
       lastMatchedEvent = streamEvent;
 
       if (streamEvent.kind === 'request') {
-        const approvalId = this.tryRegisterApproval(streamEvent, threadId, turnId);
-        if (approvalId) {
-          await this.emitWorkerEvent(out, {
-            type: 'approval_required',
-            approval_id: approvalId,
-            prompt: this.buildApprovalPrompt(streamEvent),
-          }, options);
-          return out;
-        }
-        this.activeTurnByThread.delete(threadId);
-        this.activeThreadByTurn.delete(turnId);
-        await this.emitWorkerEvent(out, {
-          type: 'failed',
-          error: this.buildUnsupportedRequestError(streamEvent),
-        }, options);
+        await this.handleTurnRequestEvent(out, streamEvent, threadId, turnId, options);
         return out;
       }
 
-      if (streamEvent.method === 'item/agentMessage/delta') {
-        const delta = this.asString(streamEvent.params.delta);
-        if (!delta) {
-          continue;
-        }
-
-        deltaProgressMessage += delta;
-        const progressMessage = deltaProgressMessage.trim();
-        if (!this.shouldEmitDeltaProgress(delta, progressMessage, lastEmittedProgressMessage)) {
-          continue;
-        }
-
-        lastProgressMessage = progressMessage;
-        lastEmittedProgressMessage = progressMessage;
-        await this.emitWorkerEvent(out, { type: 'progress', message: progressMessage }, options);
+      const deltaHandled = await this.handleDeltaEvent(
+        out,
+        streamEvent,
+        options,
+        deltaProgressMessage,
+        lastProgressMessage,
+        lastEmittedProgressMessage,
+      );
+      if (deltaHandled) {
+        deltaProgressMessage = deltaHandled.deltaProgressMessage;
+        lastEmittedProgressMessage = deltaHandled.lastEmittedProgressMessage;
+        lastProgressMessage = deltaHandled.lastProgressMessage;
         continue;
       }
 
-      if (streamEvent.method === METHODS.itemCompleted) {
-        const item = this.asRecord(streamEvent.params.item);
-        if (this.asString(item.type) === 'agentMessage') {
-          const text = this.asString(item.text);
-          if (!text) {
-            continue;
-          }
-          const phase = this.asString(item.phase);
-          if (phase === 'final_answer') {
-            finalMessage = text;
-            continue;
-          }
-          lastProgressMessage = text;
-          deltaProgressMessage = text;
-          if (text !== lastEmittedProgressMessage) {
-            lastEmittedProgressMessage = text;
-            await this.emitWorkerEvent(out, { type: 'progress', message: text }, options);
-          }
-        }
+      const completedItemHandled = await this.handleItemCompletedEvent(
+        out,
+        streamEvent,
+        options,
+        deltaProgressMessage,
+        lastProgressMessage,
+        lastEmittedProgressMessage,
+      );
+      if (completedItemHandled) {
+        deltaProgressMessage = completedItemHandled.deltaProgressMessage;
+        lastEmittedProgressMessage = completedItemHandled.lastEmittedProgressMessage;
+        lastProgressMessage = completedItemHandled.lastProgressMessage;
+        finalMessage = completedItemHandled.finalMessage;
         continue;
       }
 
@@ -483,25 +460,178 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
       }
 
       if (streamEvent.method === METHODS.turnCompleted) {
-        const turn = this.asRecord(streamEvent.params.turn);
-        const status = this.asString(turn.status);
-        this.activeTurnByThread.delete(threadId);
-        this.activeThreadByTurn.delete(turnId);
-
-        if (status === 'failed') {
-          const turnError = this.asRecord(turn.error);
-          const errorMessage = this.asString(turnError.message) ?? 'turn failed';
-          await this.emitWorkerEvent(out, { type: 'failed', error: errorMessage }, options);
-          return out;
-        }
-
-        await this.emitWorkerEvent(out, {
-          type: 'completed',
-          message: finalMessage ?? lastProgressMessage ?? 'completed',
-        }, options);
+        await this.handleTurnCompletedEvent(
+          out,
+          streamEvent,
+          threadId,
+          turnId,
+          options,
+          finalMessage,
+          lastProgressMessage,
+        );
         return out;
       }
     }
+  }
+
+  private async handleTurnRequestEvent(
+    out: WorkerRunEvent[],
+    streamEvent: StreamEvent,
+    threadId: string,
+    turnId: string,
+    options?: WorkerRunOptions,
+  ): Promise<void> {
+    const approvalId = this.tryRegisterApproval(streamEvent, threadId, turnId);
+    if (approvalId) {
+      await this.emitWorkerEvent(out, {
+        type: 'approval_required',
+        approval_id: approvalId,
+        prompt: this.buildApprovalPrompt(streamEvent),
+      }, options);
+      return;
+    }
+
+    this.activeTurnByThread.delete(threadId);
+    this.activeThreadByTurn.delete(turnId);
+    await this.emitWorkerEvent(out, {
+      type: 'failed',
+      error: this.buildUnsupportedRequestError(streamEvent),
+    }, options);
+  }
+
+  private async handleDeltaEvent(
+    out: WorkerRunEvent[],
+    streamEvent: StreamEvent,
+    options: WorkerRunOptions | undefined,
+    deltaProgressMessage: string,
+    lastProgressMessage: string | null,
+    lastEmittedProgressMessage: string | null,
+  ): Promise<{
+    deltaProgressMessage: string;
+    lastEmittedProgressMessage: string | null;
+    lastProgressMessage: string | null;
+  } | null> {
+    if (streamEvent.method !== 'item/agentMessage/delta') {
+      return null;
+    }
+
+    const delta = this.asString(streamEvent.params.delta);
+    if (!delta) {
+      return {
+        deltaProgressMessage,
+        lastEmittedProgressMessage,
+        lastProgressMessage,
+      };
+    }
+
+    const nextDeltaProgressMessage = deltaProgressMessage + delta;
+    const progressMessage = nextDeltaProgressMessage.trim();
+    if (!this.shouldEmitDeltaProgress(delta, progressMessage, lastEmittedProgressMessage)) {
+      return {
+        deltaProgressMessage: nextDeltaProgressMessage,
+        lastEmittedProgressMessage,
+        lastProgressMessage,
+      };
+    }
+
+    await this.emitWorkerEvent(out, { type: 'progress', message: progressMessage }, options);
+    return {
+      deltaProgressMessage: nextDeltaProgressMessage,
+      lastEmittedProgressMessage: progressMessage,
+      lastProgressMessage: progressMessage,
+    };
+  }
+
+  private async handleItemCompletedEvent(
+    out: WorkerRunEvent[],
+    streamEvent: StreamEvent,
+    options: WorkerRunOptions | undefined,
+    deltaProgressMessage: string,
+    lastProgressMessage: string | null,
+    lastEmittedProgressMessage: string | null,
+  ): Promise<{
+    deltaProgressMessage: string;
+    lastEmittedProgressMessage: string | null;
+    lastProgressMessage: string | null;
+    finalMessage: string | null;
+  } | null> {
+    if (streamEvent.method !== METHODS.itemCompleted) {
+      return null;
+    }
+
+    const item = this.asRecord(streamEvent.params.item);
+    if (this.asString(item.type) !== 'agentMessage') {
+      return {
+        deltaProgressMessage,
+        lastEmittedProgressMessage,
+        lastProgressMessage,
+        finalMessage: null,
+      };
+    }
+
+    const text = this.asString(item.text);
+    if (!text) {
+      return {
+        deltaProgressMessage,
+        lastEmittedProgressMessage,
+        lastProgressMessage,
+        finalMessage: null,
+      };
+    }
+
+    const phase = this.asString(item.phase);
+    if (phase === 'final_answer') {
+      return {
+        deltaProgressMessage: text,
+        lastEmittedProgressMessage,
+        lastProgressMessage: null,
+        finalMessage: text,
+      };
+    }
+
+    if (text !== lastEmittedProgressMessage) {
+      await this.emitWorkerEvent(out, { type: 'progress', message: text }, options);
+      return {
+        deltaProgressMessage: text,
+        lastEmittedProgressMessage: text,
+        lastProgressMessage: text,
+        finalMessage: null,
+      };
+    }
+
+    return {
+      deltaProgressMessage: text,
+      lastEmittedProgressMessage,
+      lastProgressMessage: text,
+      finalMessage: null,
+    };
+  }
+
+  private async handleTurnCompletedEvent(
+    out: WorkerRunEvent[],
+    streamEvent: StreamEvent,
+    threadId: string,
+    turnId: string,
+    options: WorkerRunOptions | undefined,
+    finalMessage: string | null,
+    lastProgressMessage: string | null,
+  ): Promise<void> {
+    const turn = this.asRecord(streamEvent.params.turn);
+    const status = this.asString(turn.status);
+    this.activeTurnByThread.delete(threadId);
+    this.activeThreadByTurn.delete(turnId);
+
+    if (status === 'failed') {
+      const turnError = this.asRecord(turn.error);
+      const errorMessage = this.asString(turnError.message) ?? 'turn failed';
+      await this.emitWorkerEvent(out, { type: 'failed', error: errorMessage }, options);
+      return;
+    }
+
+    await this.emitWorkerEvent(out, {
+      type: 'completed',
+      message: finalMessage ?? lastProgressMessage ?? 'completed',
+    }, options);
   }
 
   private async emitWorkerEvent(
