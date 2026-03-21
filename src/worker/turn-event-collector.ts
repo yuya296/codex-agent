@@ -1,20 +1,11 @@
 import type { WorkerRunEvent, WorkerRunOptions } from './types.js';
-
-export interface StreamEvent {
-  kind: 'request' | 'notification';
-  method: string;
-  params: Record<string, unknown>;
-  id?: number | string;
-  threadId?: string;
-  turnId?: string;
-}
+import type { StreamEvent } from './worker-protocol-adapter.js';
 
 interface CollectorDeps {
   waitForStreamEvent(match: (event: StreamEvent) => boolean): Promise<StreamEvent>;
   isTurnScopedEvent(event: StreamEvent, threadId: string, turnId: string): boolean;
   buildStreamTimeoutError(error: unknown, lastMatchedEvent: StreamEvent | null): Error;
   tryRegisterApproval(streamEvent: StreamEvent, threadId: string, turnId: string): string | null;
-  buildApprovalPrompt(streamEvent: StreamEvent): string;
   buildUnsupportedRequestError(streamEvent: StreamEvent): string;
   emitWorkerEvent(out: WorkerRunEvent[], event: WorkerRunEvent, options?: WorkerRunOptions): Promise<void>;
   shouldEmitDeltaProgress(
@@ -22,8 +13,11 @@ interface CollectorDeps {
     progressMessage: string,
     lastEmittedProgressMessage: string | null,
   ): boolean;
-  asString(value: unknown): string | undefined;
-  asRecord(value: unknown): Record<string, unknown>;
+  buildApprovalPrompt(streamEvent: StreamEvent): string;
+  readAgentMessageDelta(event: StreamEvent): string | null;
+  readCompletedAgentMessage(event: StreamEvent): { text: string; phase: string | null } | null;
+  isErrorEvent(event: StreamEvent): boolean;
+  readTurnCompletion(event: StreamEvent): { status: string | null; errorMessage: string } | null;
   clearActiveTurn(threadId: string, turnId: string): void;
 }
 
@@ -72,12 +66,8 @@ export class TurnEventCollector {
         return out;
       }
 
-      if (streamEvent.method === 'item/agentMessage/delta') {
-        const delta = this.deps.asString(streamEvent.params.delta);
-        if (!delta) {
-          continue;
-        }
-
+      const delta = this.deps.readAgentMessageDelta(streamEvent);
+      if (delta) {
         deltaProgressMessage += delta;
         const progressMessage = deltaProgressMessage.trim();
         if (!this.deps.shouldEmitDeltaProgress(delta, progressMessage, lastEmittedProgressMessage)) {
@@ -90,43 +80,32 @@ export class TurnEventCollector {
         continue;
       }
 
-      if (streamEvent.method === 'item/completed') {
-        const item = this.deps.asRecord(streamEvent.params.item);
-        if (this.deps.asString(item.type) === 'agentMessage') {
-          const text = this.deps.asString(item.text);
-          if (!text) {
-            continue;
-          }
+      const completedAgentMessage = this.deps.readCompletedAgentMessage(streamEvent);
+      if (completedAgentMessage) {
+        if (completedAgentMessage.phase === 'final_answer') {
+          finalMessage = completedAgentMessage.text;
+          continue;
+        }
 
-          const phase = this.deps.asString(item.phase);
-          if (phase === 'final_answer') {
-            finalMessage = text;
-            continue;
-          }
-
-          lastProgressMessage = text;
-          deltaProgressMessage = text;
-          if (text !== lastEmittedProgressMessage) {
-            lastEmittedProgressMessage = text;
-            await this.deps.emitWorkerEvent(out, { type: 'progress', message: text }, options);
-          }
+        lastProgressMessage = completedAgentMessage.text;
+        deltaProgressMessage = completedAgentMessage.text;
+        if (completedAgentMessage.text !== lastEmittedProgressMessage) {
+          lastEmittedProgressMessage = completedAgentMessage.text;
+          await this.deps.emitWorkerEvent(out, { type: 'progress', message: completedAgentMessage.text }, options);
         }
         continue;
       }
 
-      if (streamEvent.method === 'error') {
+      if (this.deps.isErrorEvent(streamEvent)) {
         continue;
       }
 
-      if (streamEvent.method === 'turn/completed') {
-        const turn = this.deps.asRecord(streamEvent.params.turn);
-        const status = this.deps.asString(turn.status);
+      const turnCompletion = this.deps.readTurnCompletion(streamEvent);
+      if (turnCompletion) {
         this.deps.clearActiveTurn(threadId, turnId);
 
-        if (status === 'failed') {
-          const turnError = this.deps.asRecord(turn.error);
-          const errorMessage = this.deps.asString(turnError.message) ?? 'turn failed';
-          await this.deps.emitWorkerEvent(out, { type: 'failed', error: errorMessage }, options);
+        if (turnCompletion.status === 'failed') {
+          await this.deps.emitWorkerEvent(out, { type: 'failed', error: turnCompletion.errorMessage }, options);
           return out;
         }
 
