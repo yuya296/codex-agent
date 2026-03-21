@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import type { ApprovalDecision } from '../domain/types.js';
 import { ApprovalRegistry } from './approval-registry.js';
+import { StreamEventQueue } from './stream-event-queue.js';
 import type { WorkerClient, WorkerRunEvent, WorkerRunOptions } from './types.js';
 import { TurnEventCollector, type StreamEvent } from './turn-event-collector.js';
 
@@ -36,13 +37,6 @@ interface PendingRequest {
 }
 
 type WorkerStreamEvent = StreamEvent & { id?: JsonRpcId };
-
-interface StreamWaiter {
-  match: (event: WorkerStreamEvent) => boolean;
-  resolve: (event: WorkerStreamEvent) => void;
-  reject: (error: Error) => void;
-  timer: NodeJS.Timeout;
-}
 
 interface WorkerClientOptions {
   streamEventTimeoutMs?: number;
@@ -86,8 +80,7 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
   private readonly child: ChildProcessWithoutNullStreams;
   private nextId = 1;
   private readonly pending = new Map<JsonRpcId, PendingRequest>();
-  private readonly streamBuffer: WorkerStreamEvent[] = [];
-  private readonly streamWaiters: StreamWaiter[] = [];
+  private readonly streamEventQueue: StreamEventQueue<WorkerStreamEvent>;
   private readonly loadedThreads = new Set<string>();
   private readonly activeTurnByThread = new Map<string, string>();
   private readonly activeThreadByTurn = new Map<string, string>();
@@ -106,6 +99,7 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
     this.streamEventTimeoutMs = options.streamEventTimeoutMs ?? DEFAULT_STREAM_EVENT_TIMEOUT_MS;
     this.debugEvents = options.debugEvents ?? false;
     this.debugDeltaEvents = options.debugDeltaEvents ?? false;
+    this.streamEventQueue = new StreamEventQueue<WorkerStreamEvent>(this.streamEventTimeoutMs);
     this.turnEventCollector = new TurnEventCollector({
       waitForStreamEvent: async (match) => this.waitForStreamEvent(match),
       isTurnScopedEvent: (event, threadId, turnId) => this.isTurnScopedEvent(event, threadId, turnId),
@@ -348,46 +342,11 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
 
   private pushStreamEvent(event: WorkerStreamEvent): void {
     this.logStreamEvent(event);
-    const waiterIndex = this.streamWaiters.findIndex((waiter) => waiter.match(event));
-    if (waiterIndex >= 0) {
-      const [waiter] = this.streamWaiters.splice(waiterIndex, 1);
-      if (!waiter) {
-        this.streamBuffer.push(event);
-        return;
-      }
-      clearTimeout(waiter.timer);
-      waiter.resolve(event);
-      return;
-    }
-
-    this.streamBuffer.push(event);
+    this.streamEventQueue.push(event);
   }
 
   private waitForStreamEvent(match: (event: StreamEvent) => boolean): Promise<WorkerStreamEvent> {
-    const bufferedIndex = this.streamBuffer.findIndex(match);
-    if (bufferedIndex >= 0) {
-      const [event] = this.streamBuffer.splice(bufferedIndex, 1);
-      if (event) {
-        return Promise.resolve(event);
-      }
-    }
-
-    return new Promise<WorkerStreamEvent>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.removeWaiter(waiter);
-        reject(new Error(`timed out waiting for worker stream event (${this.streamEventTimeoutMs}ms)`));
-      }, this.streamEventTimeoutMs);
-
-      const waiter: StreamWaiter = { match, resolve, reject, timer };
-      this.streamWaiters.push(waiter);
-    });
-  }
-
-  private removeWaiter(target: StreamWaiter): void {
-    const index = this.streamWaiters.indexOf(target);
-    if (index >= 0) {
-      this.streamWaiters.splice(index, 1);
-    }
+    return this.streamEventQueue.waitFor(match);
   }
 
   private isTurnScopedEvent(event: StreamEvent, threadId: string, turnId: string): boolean {
@@ -752,9 +711,6 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
       entry.reject(error);
     }
 
-    for (const waiter of this.streamWaiters.splice(0)) {
-      clearTimeout(waiter.timer);
-      waiter.reject(error);
-    }
+    this.streamEventQueue.failAll(error);
   }
 }
