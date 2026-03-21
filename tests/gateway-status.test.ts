@@ -49,7 +49,7 @@ test('notifyProgress: status update failure does not throw', async () => {
   await assert.doesNotReject(() => gateway.notifyProgress(createSession(), 'long progress message'));
 });
 
-test('toSlackMrkdwn: converts markdown to mrkdwn using md-to-slack behavior', () => {
+test('toSlackMrkdwn: preserves line structure and converts list/inline markdown for Slack', () => {
   const converted = toSlackMrkdwn(
     [
       '# Heading',
@@ -57,17 +57,22 @@ test('toSlackMrkdwn: converts markdown to mrkdwn using md-to-slack behavior', ()
       '- **bold** item',
       '- [example](https://example.com)',
       '',
+      '1. `npm test` を実行',
+      '2. *結果* を確認',
+      '',
       '```ts',
       'const value = 1;',
       '```',
     ].join('\n'),
   );
 
-  assert.equal(converted.includes('# Heading'), false);
+  assert.match(converted, /^# Heading/m);
   assert.match(converted, /\*bold\*/);
   assert.match(converted, /<https:\/\/example\.com\|example>/);
+  assert.match(converted, /1\. `npm test` を実行/);
+  assert.match(converted, /2\. _結果_ を確認/);
   assert.match(converted, /```/);
-  assert.match(converted, /• \*bold\* item/);
+  assert.match(converted, /\* \*bold\* item/);
 });
 
 test('notifyCompleted: converts markdown before posting thread message', async () => {
@@ -87,10 +92,10 @@ test('notifyCompleted: converts markdown before posting thread message', async (
   );
 
   assert.equal(posted.length, 1);
-  assert.equal(posted[0]?.text.includes('# Heading'), false);
+  assert.match(posted[0]?.text ?? '', /^# Heading/m);
   assert.match(posted[0]?.text ?? '', /\*bold\*/);
   assert.match(posted[0]?.text ?? '', /<https:\/\/example\.com\|example>/);
-  assert.match(posted[0]?.text ?? '', /• \*bold\* item/);
+  assert.match(posted[0]?.text ?? '', /\* \*bold\* item/);
 });
 
 test('extractLocalImageFiles: strips markdown image syntax and bare local paths', () => {
@@ -122,8 +127,8 @@ test('renderSlackCompletedMessage: posts text and image uploads separately', () 
   assert.equal(rendered.images.length, 1);
   assert.equal(rendered.images[0]?.path, path);
   assert.equal(rendered.text.includes(path), false);
-  assert.equal(rendered.text.includes('# Heading'), false);
-  assert.match(rendered.text, /• item/);
+  assert.equal(rendered.text.includes('# Heading'), true);
+  assert.match(rendered.text, /\* item/);
 });
 
 test('handleMessageEvent: file_share subtype is accepted and temporary directory is cleaned up', async () => {

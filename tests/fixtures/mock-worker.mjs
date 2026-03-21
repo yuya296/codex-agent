@@ -249,6 +249,13 @@ rl.on('line', (line) => {
         return;
       }
 
+      if (text.includes('[SOFT_ERROR]')) {
+        notify('error', { message: 'Reconnecting... 2/5' });
+        emitAgentMessage(threadId, turnId, 'done:[SOFT_ERROR]', 'final_answer');
+        turnCompleted(threadId, turnId);
+        return;
+      }
+
       if (text.includes('[FAIL]')) {
         turnFailed(threadId, turnId, 'mock-failure');
         return;

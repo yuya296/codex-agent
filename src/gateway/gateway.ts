@@ -9,7 +9,7 @@ import type {
   StartSessionInput,
 } from '../domain/types.js';
 import type { Orchestrator, GatewayNotifier } from '../orchestrator/orchestrator.js';
-import { markdownToSlack } from 'md-to-slack';
+import { parseAdminCommand, type AdminCommandHandler } from '../admin/commands.js';
 
 export interface SlackPublisher {
   postThreadMessage(input: {
@@ -66,6 +66,7 @@ export class Gateway implements GatewayNotifier {
   public constructor(
     private readonly orchestrator: Orchestrator,
     private readonly publisher: SlackPublisher,
+    private readonly adminCommands?: AdminCommandHandler,
   ) {}
 
   public async handleMessageEvent(event: SlackMessageEvent): Promise<void> {
@@ -77,6 +78,18 @@ export class Gateway implements GatewayNotifier {
       const rootThreadTs =
         event.assistant_thread?.thread_ts ??
         (event.parent_user_id && event.thread_ts ? event.thread_ts : event.ts);
+
+      const adminCommand = parseAdminCommand(event.text);
+      if (adminCommand && this.adminCommands) {
+        const response = await this.adminCommands.execute(adminCommand);
+        await this.publisher.postThreadMessage({
+          channel_id: event.channel_id,
+          root_thread_ts: rootThreadTs,
+          text: response,
+        });
+        return;
+      }
+
       if (rootThreadTs === event.ts) {
         const input: StartSessionInput = {
           slack_team_id: event.team_id,
@@ -218,7 +231,7 @@ export function toSlackLoadingMessage(message: string): string {
 }
 
 export function toSlackMrkdwn(message: string): string {
-  return normalizeSlackMrkdwnLists(markdownToSlack(message));
+  return renderSlackText(message);
 }
 
 export function renderSlackCompletedMessage(message: string): {
@@ -292,7 +305,7 @@ function cleanupExtractedMessage(text: string): string {
     .trim();
 }
 
-function normalizeSlackMrkdwnLists(text: string): string {
+function renderSlackText(text: string): string {
   const lines = text.split('\n');
   let inCodeBlock = false;
 
@@ -307,7 +320,46 @@ function normalizeSlackMrkdwnLists(text: string): string {
         return line;
       }
 
-      return line.replace(/^(\s*)-\s+/u, '$1• ');
+      if (!line.trim()) {
+        return '';
+      }
+
+      const unorderedListMatch = line.match(/^(\s*)[-*+]\s+(.*)$/u);
+      if (unorderedListMatch) {
+        const indent = unorderedListMatch[1] ?? '';
+        const content = unorderedListMatch[2] ?? '';
+        return `${indent}* ${renderSlackInline(content)}`;
+      }
+
+      const orderedListMatch = line.match(/^(\s*)(\d+)\.\s+(.*)$/u);
+      if (orderedListMatch) {
+        const indent = orderedListMatch[1] ?? '';
+        const number = orderedListMatch[2] ?? '';
+        const content = orderedListMatch[3] ?? '';
+        return `${indent}${number}. ${renderSlackInline(content)}`;
+      }
+
+      return renderSlackInline(line);
     })
     .join('\n');
+}
+
+function renderSlackInline(line: string): string {
+  const segments = line.split(/(`[^`]*`)/u);
+
+  return segments
+    .map((segment) => {
+      if (segment.startsWith('`') && segment.endsWith('`')) {
+        return segment;
+      }
+
+      return segment
+        .replace(/!\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)/gu, '$1 <$2>')
+        .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/gu, '<$2|$1>')
+        .replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/gu, '_$1_')
+        .replace(/\*\*([^*\n]+)\*\*/gu, '*$1*')
+        .replace(/__([^_\n]+)__/gu, '*$1*')
+        .replace(/~~([^~\n]+)~~/gu, '~$1~');
+    })
+    .join('');
 }

@@ -139,7 +139,17 @@ PORT=
 
 `SLACK_AGENT_CHAT_STATUS_ENABLED=true` にすると、進捗通知に `assistant.threads.setStatus` を使います。classic な DM スレッド返信を維持したい場合は、Slack App 側の `Agent or Assistant` は OFF にしてください。
 
-通常回答の completed メッセージは、送信直前に Markdown から Slack の mrkdwn へ変換します。箇条書きの `- ` は Slack 向けに `• ` へ寄せます。ローカル画像パス（`/tmp/...png` など）が含まれる場合は、本文から取り除いたうえで thread にファイル添付します。Slack で受け取った画像添付は bot token の `files:read` で download し、一時ファイルのパスを worker に渡します。approval と status は今回の変換対象外です。
+通常回答の completed メッセージは、送信直前に Markdown を Slack 向けテキストへ整形します。箇条書きは `* `、番号付きリストは `1. ` の行構造を保つようにしています。ローカル画像パス（`/tmp/...png` など）が含まれる場合は、本文から取り除いたうえで thread にファイル添付します。Slack で受け取った画像添付は bot token の `files:read` で download し、一時ファイルのパスを worker に渡します。approval と status は今回の変換対象外です。
+
+DM では管理コマンドも使えます。Slack の slash command ではなく通常メッセージとして送ります。先頭の空白は任意です。
+
+- `/help`
+- `/status`
+- `/doctor`
+- `/worker-restart`
+- `/codex-check-update`
+
+これらのレスポンスは英語です。
 
 `WORKER_STREAM_EVENT_TIMEOUT_MS` は worker の turn 内で無通信を許容する最大時間です。重い処理で 5 分が短い場合だけ伸ばしてください。
 

@@ -479,12 +479,7 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
       }
 
       if (streamEvent.method === METHODS.error) {
-        const error = this.asRecord(streamEvent.params.error);
-        const message = this.asString(error.message) ?? 'worker reported an error';
-        this.activeTurnByThread.delete(threadId);
-        this.activeThreadByTurn.delete(turnId);
-        await this.emitWorkerEvent(out, { type: 'failed', error: message }, options);
-        return out;
+        continue;
       }
 
       if (streamEvent.method === METHODS.turnCompleted) {
@@ -637,6 +632,22 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
   }
 
   private summarizeEvent(event: StreamEvent): string {
+    const topLevelMessage = this.asString(event.params.message);
+    if (topLevelMessage) {
+      return this.truncate(topLevelMessage);
+    }
+
+    const errorObject = this.asRecord(event.params.error);
+    const errorMessage = this.asString(errorObject.message);
+    if (errorMessage) {
+      return this.truncate(errorMessage);
+    }
+
+    const errorString = this.asString(event.params.error);
+    if (errorString) {
+      return this.truncate(errorString);
+    }
+
     const delta = this.asString(event.params.delta);
     if (delta) {
       return this.truncate(delta);

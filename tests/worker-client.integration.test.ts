@@ -114,3 +114,23 @@ test('worker client: agentMessage delta emits streaming progress callbacks', asy
 
   await worker.close();
 });
+
+test('worker client: non-fatal error notification does not fail a completed turn', async () => {
+  const worker = new StdioJsonRpcWorkerClient(process.execPath, [fixturePath()]);
+  const { codex_thread_id } = await worker.createThread();
+
+  const events = await worker.sendUserMessage({
+    codex_thread_id,
+    text: '[SOFT_ERROR]',
+    user_id: 'U1',
+  });
+
+  assert.deepEqual(events, [
+    {
+      type: 'completed',
+      message: 'done:[SOFT_ERROR]',
+    },
+  ]);
+
+  await worker.close();
+});

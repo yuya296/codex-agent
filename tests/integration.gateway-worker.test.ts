@@ -278,10 +278,10 @@ test('integration: completed markdown is converted to mrkdwn before posting', as
   );
 
   assert.equal(publisher.posted.length, 1);
-  assert.equal(publisher.posted[0]?.text.includes('# Heading'), false);
+  assert.equal(publisher.posted[0]?.text.includes('# Heading'), true);
   assert.match(publisher.posted[0]?.text ?? '', /\*bold\*/);
   assert.match(publisher.posted[0]?.text ?? '', /<https:\/\/example\.com\|example>/);
-  assert.match(publisher.posted[0]?.text ?? '', /• \*bold\* item/);
+  assert.match(publisher.posted[0]?.text ?? '', /\* \*bold\* item/);
   assert.equal(publisher.uploads.length, 0);
 
   await worker.close();
