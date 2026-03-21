@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import type { ApprovalDecision } from '../domain/types.js';
+import { ApprovalRegistry } from './approval-registry.js';
 import type { WorkerClient, WorkerRunEvent, WorkerRunOptions } from './types.js';
 import { TurnEventCollector, type StreamEvent } from './turn-event-collector.js';
 
@@ -41,13 +42,6 @@ interface StreamWaiter {
   resolve: (event: WorkerStreamEvent) => void;
   reject: (error: Error) => void;
   timer: NodeJS.Timeout;
-}
-
-interface PendingApproval {
-  requestId: JsonRpcId;
-  method: string;
-  threadId: string;
-  turnId: string;
 }
 
 interface WorkerClientOptions {
@@ -97,7 +91,7 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
   private readonly loadedThreads = new Set<string>();
   private readonly activeTurnByThread = new Map<string, string>();
   private readonly activeThreadByTurn = new Map<string, string>();
-  private readonly pendingApprovals = new Map<string, PendingApproval>();
+  private readonly approvalRegistry = new ApprovalRegistry();
   private initializePromise: Promise<void> | null = null;
   private readonly streamEventTimeoutMs: number;
   private readonly debugEvents: boolean;
@@ -225,12 +219,10 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
   }, options?: WorkerRunOptions): Promise<WorkerRunEvent[]> {
     await this.ensureInitialized();
 
-    const pendingApproval = this.pendingApprovals.get(input.approval_id);
+    const pendingApproval = this.approvalRegistry.consume(input.approval_id);
     if (!pendingApproval) {
       throw new Error(`unknown approval id: ${input.approval_id}`);
     }
-
-    this.pendingApprovals.delete(input.approval_id);
 
     await this.respondToServerRequest(
       pendingApproval.requestId,
@@ -477,7 +469,7 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
       return null;
     }
 
-    this.pendingApprovals.set(approvalId, {
+    this.approvalRegistry.register(approvalId, {
       requestId: streamEvent.id,
       method: streamEvent.method,
       threadId: resolvedThreadId,
