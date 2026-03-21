@@ -21,8 +21,6 @@ flowchart LR
 
     G1["channel adapter"]
     G2["presentation"]
-
-    G1 --> G2
   end
 
   subgraph Orchestrator["orchestrator"]
@@ -30,8 +28,6 @@ flowchart LR
 
     O1["session manager"]
     O2["repository (sqlite)"]
-
-    O1 --> O2
   end
 
   subgraph Worker["worker"]
@@ -39,8 +35,6 @@ flowchart LR
 
     W1["thin wrapper"]
     W2["codex app-server"]
-
-    W1 <--> W2
   end
 
   Slack <-->|socket-mode| Gateway
