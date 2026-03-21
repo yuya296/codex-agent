@@ -20,19 +20,19 @@ test('running state: additional message should be handled as steer', async () =>
   worker.sendUserMessageImpl = async ({ text }) => [{ type: 'progress', message: `working:${text}` }];
   worker.sendSteerMessageImpl = async ({ text }) => [{ type: 'progress', message: `steer:${text}` }];
 
-  const started = await orchestrator.startSessionFromSlack({
-    slack_team_id: 'T1',
-    slack_channel_id: 'D1',
-    slack_root_thread_ts: '111.1',
+  const started = await orchestrator.startSession({
+    channel_team_id: 'T1',
+    channel_id: 'D1',
+    channel_thread_id: '111.1',
     user_id: 'U1',
     text: 'first',
   });
   assert.equal(started.state, 'running');
 
-  const continued = await orchestrator.continueSessionFromSlack({
-    slack_team_id: 'T1',
-    slack_channel_id: 'D1',
-    slack_root_thread_ts: '111.1',
+  const continued = await orchestrator.continueSession({
+    channel_team_id: 'T1',
+    channel_id: 'D1',
+    channel_thread_id: '111.1',
     user_id: 'U1',
     text: 'second',
   });
@@ -62,26 +62,26 @@ test('waiting_approval state: additional message should reject current approval 
     return [{ type: 'completed', message: `done:${text}` }];
   };
 
-  await orchestrator.startSessionFromSlack({
-    slack_team_id: 'T1',
-    slack_channel_id: 'D1',
-    slack_root_thread_ts: '111.2',
+  await orchestrator.startSession({
+    channel_team_id: 'T1',
+    channel_id: 'D1',
+    channel_thread_id: '111.2',
     user_id: 'U1',
     text: 'first',
   });
 
-  const sessionBefore = repository.findBySlackThread({
-    slack_team_id: 'T1',
-    slack_channel_id: 'D1',
-    slack_root_thread_ts: '111.2',
+  const sessionBefore = repository.findByChannelThread({
+    channel_team_id: 'T1',
+    channel_id: 'D1',
+    channel_thread_id: '111.2',
   });
   assert.equal(sessionBefore?.state, 'waiting_approval');
   assert.equal(sessionBefore?.pending_approval_id, 'approval-1');
 
-  const continued = await orchestrator.continueSessionFromSlack({
-    slack_team_id: 'T1',
-    slack_channel_id: 'D1',
-    slack_root_thread_ts: '111.2',
+  const continued = await orchestrator.continueSession({
+    channel_team_id: 'T1',
+    channel_id: 'D1',
+    channel_thread_id: '111.2',
     user_id: 'U1',
     text: 'new-plan',
   });
@@ -112,18 +112,18 @@ test('approval button: decision should be forwarded to worker', async () => {
     },
   ];
 
-  await orchestrator.startSessionFromSlack({
-    slack_team_id: 'T1',
-    slack_channel_id: 'D1',
-    slack_root_thread_ts: '111.3',
+  await orchestrator.startSession({
+    channel_team_id: 'T1',
+    channel_id: 'D1',
+    channel_thread_id: '111.3',
     user_id: 'U1',
     text: 'ask',
   });
 
   const resolved = await orchestrator.resolveApproval({
-    slack_team_id: 'T1',
-    slack_channel_id: 'D1',
-    slack_root_thread_ts: '111.3',
+    channel_team_id: 'T1',
+    channel_id: 'D1',
+    channel_thread_id: '111.3',
     approval_id: 'approval-2',
     decision: 'approve',
   });
@@ -150,20 +150,20 @@ test('failed session should remain resumable via same slack thread', async () =>
     return [{ type: 'completed', message: `recovered:${text}` }];
   };
 
-  const started = await orchestrator.startSessionFromSlack({
-    slack_team_id: 'T1',
-    slack_channel_id: 'D1',
-    slack_root_thread_ts: '111.4',
+  const started = await orchestrator.startSession({
+    channel_team_id: 'T1',
+    channel_id: 'D1',
+    channel_thread_id: '111.4',
     user_id: 'U1',
     text: 'first',
   });
   assert.equal(started.state, 'failed');
   assert.equal(notifier.failedMessages.length, 1);
 
-  const resumed = await orchestrator.continueSessionFromSlack({
-    slack_team_id: 'T1',
-    slack_channel_id: 'D1',
-    slack_root_thread_ts: '111.4',
+  const resumed = await orchestrator.continueSession({
+    channel_team_id: 'T1',
+    channel_id: 'D1',
+    channel_thread_id: '111.4',
     user_id: 'U1',
     text: 'retry',
   });
@@ -181,10 +181,10 @@ test('missing session on thread reply should start a new session', async () => {
 
   worker.sendUserMessageImpl = async ({ text }) => [{ type: 'completed', message: `done:${text}` }];
 
-  const started = await orchestrator.continueSessionFromSlack({
-    slack_team_id: 'T1',
-    slack_channel_id: 'D1',
-    slack_root_thread_ts: '111.5',
+  const started = await orchestrator.continueSession({
+    channel_team_id: 'T1',
+    channel_id: 'D1',
+    channel_thread_id: '111.5',
     user_id: 'U1',
     text: 'first',
   });
@@ -193,10 +193,10 @@ test('missing session on thread reply should start a new session', async () => {
   assert.deepEqual(worker.callLog, ['createThread', 'sendUserMessage']);
   assert.deepEqual(notifier.progressMessages, ['thinking...']);
 
-  const saved = repository.findBySlackThread({
-    slack_team_id: 'T1',
-    slack_channel_id: 'D1',
-    slack_root_thread_ts: '111.5',
+  const saved = repository.findByChannelThread({
+    channel_team_id: 'T1',
+    channel_id: 'D1',
+    channel_thread_id: '111.5',
   });
   assert.equal(saved?.session_id, started.session_id);
 
@@ -213,10 +213,10 @@ test('worker callback: streaming progress should be reflected before returned ev
     return [];
   };
 
-  const started = await orchestrator.startSessionFromSlack({
-    slack_team_id: 'T1',
-    slack_channel_id: 'D1',
-    slack_root_thread_ts: '111.6',
+  const started = await orchestrator.startSession({
+    channel_team_id: 'T1',
+    channel_id: 'D1',
+    channel_thread_id: '111.6',
     user_id: 'U1',
     text: 'live',
   });

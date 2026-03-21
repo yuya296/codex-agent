@@ -8,6 +8,12 @@ export const SESSION_STATES = [
 
 export type SessionState = (typeof SESSION_STATES)[number];
 
+export interface ChannelThreadRef {
+  channel_team_id: string;
+  channel_id: string;
+  channel_thread_id: string;
+}
+
 export interface SlackThreadRef {
   slack_team_id: string;
   slack_channel_id: string;
@@ -33,17 +39,17 @@ export interface ApprovalRequest {
   prompt: string;
 }
 
-export interface StartSessionInput extends SlackThreadRef {
+export interface StartSessionInput extends ChannelThreadRef {
   user_id: string;
   text: string;
 }
 
-export interface ContinueSessionInput extends SlackThreadRef {
+export interface ContinueSessionInput extends ChannelThreadRef {
   user_id: string;
   text: string;
 }
 
-export interface ResolveApprovalInput extends SlackThreadRef {
+export interface ResolveApprovalInput extends ChannelThreadRef {
   approval_id: string;
   decision: ApprovalDecision;
 }

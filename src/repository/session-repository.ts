@@ -2,9 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { SESSION_STATES, type Session, type SessionState, type SlackThreadRef } from '../domain/types.js';
+import { SESSION_STATES, type ChannelThreadRef, type Session, type SessionState } from '../domain/types.js';
 
-interface CreateSessionInput extends SlackThreadRef {
+interface CreateSessionInput extends ChannelThreadRef {
   codex_thread_id: string;
   state: SessionState;
 }
@@ -50,9 +50,9 @@ export class SessionRepository {
     const now = new Date().toISOString();
     const session: Session = {
       session_id: randomUUID(),
-      slack_team_id: input.slack_team_id,
-      slack_channel_id: input.slack_channel_id,
-      slack_root_thread_ts: input.slack_root_thread_ts,
+      slack_team_id: input.channel_team_id,
+      slack_channel_id: input.channel_id,
+      slack_root_thread_ts: input.channel_thread_id,
       codex_thread_id: input.codex_thread_id,
       state: input.state,
       pending_approval_id: null,
@@ -91,7 +91,7 @@ export class SessionRepository {
     return session;
   }
 
-  public findBySlackThread(ref: SlackThreadRef): Session | null {
+  public findByChannelThread(ref: ChannelThreadRef): Session | null {
     const row = this.db
       .prepare(
         `
@@ -112,7 +112,7 @@ export class SessionRepository {
           LIMIT 1
         `,
       )
-      .get(ref.slack_team_id, ref.slack_channel_id, ref.slack_root_thread_ts) as Session | undefined;
+      .get(ref.channel_team_id, ref.channel_id, ref.channel_thread_id) as Session | undefined;
 
     return row ?? null;
   }

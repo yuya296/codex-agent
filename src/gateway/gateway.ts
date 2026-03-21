@@ -91,24 +91,24 @@ export class Gateway implements GatewayNotifier {
 
       if (rootThreadTs === event.ts) {
         const input: StartSessionInput = {
-          slack_team_id: event.team_id,
-          slack_channel_id: event.channel_id,
-          slack_root_thread_ts: rootThreadTs,
+          channel_team_id: event.team_id,
+          channel_id: event.channel_id,
+          channel_thread_id: rootThreadTs,
           user_id: event.user_id,
           text: event.text,
         };
-        await this.orchestrator.startSessionFromSlack(input);
+        await this.orchestrator.startSession(input);
         return;
       }
 
       const input: ContinueSessionInput = {
-        slack_team_id: event.team_id,
-        slack_channel_id: event.channel_id,
-        slack_root_thread_ts: rootThreadTs,
+        channel_team_id: event.team_id,
+        channel_id: event.channel_id,
+        channel_thread_id: rootThreadTs,
         user_id: event.user_id,
         text: event.text,
       };
-      await this.orchestrator.continueSessionFromSlack(input);
+      await this.orchestrator.continueSession(input);
     } finally {
       if (event.temporary_directory) {
         await rm(event.temporary_directory, { recursive: true, force: true });
@@ -118,9 +118,9 @@ export class Gateway implements GatewayNotifier {
 
   public async handleApprovalAction(action: SlackApprovalAction): Promise<void> {
     const input: ResolveApprovalInput = {
-      slack_team_id: action.team_id,
-      slack_channel_id: action.channel_id,
-      slack_root_thread_ts: action.root_thread_ts,
+      channel_team_id: action.team_id,
+      channel_id: action.channel_id,
+      channel_thread_id: action.root_thread_ts,
       approval_id: action.approval_id,
       decision: action.decision,
     };

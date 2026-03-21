@@ -10,18 +10,18 @@ test('sessions: slack thread key must be unique', () => {
   const repository = new SessionRepository(dbPath);
 
   repository.createSession({
-    slack_team_id: 'T1',
-    slack_channel_id: 'D1',
-    slack_root_thread_ts: '100.01',
+    channel_team_id: 'T1',
+    channel_id: 'D1',
+    channel_thread_id: '100.01',
     codex_thread_id: 'thread-1',
     state: 'idle',
   });
 
   assert.throws(() => {
     repository.createSession({
-      slack_team_id: 'T1',
-      slack_channel_id: 'D1',
-      slack_root_thread_ts: '100.01',
+      channel_team_id: 'T1',
+      channel_id: 'D1',
+      channel_thread_id: '100.01',
       codex_thread_id: 'thread-2',
       state: 'idle',
     });

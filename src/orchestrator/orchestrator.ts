@@ -21,10 +21,10 @@ export class Orchestrator {
     private readonly notifier: GatewayNotifier,
   ) {}
 
-  public async startSessionFromSlack(input: StartSessionInput): Promise<Session> {
-    const existing = this.repository.findBySlackThread(input);
+  public async startSession(input: StartSessionInput): Promise<Session> {
+    const existing = this.repository.findByChannelThread(input);
     if (existing) {
-      throw new Error('session already exists for slack root thread');
+      throw new Error('session already exists for channel thread');
     }
 
     const { codex_thread_id } = await this.workerClient.createThread();
@@ -41,10 +41,10 @@ export class Orchestrator {
     }, { onEvent }));
   }
 
-  public async continueSessionFromSlack(input: ContinueSessionInput): Promise<Session> {
-    const session = this.repository.findBySlackThread(input);
+  public async continueSession(input: ContinueSessionInput): Promise<Session> {
+    const session = this.repository.findByChannelThread(input);
     if (!session) {
-      return this.startSessionFromSlack(input);
+      return this.startSession(input);
     }
 
     let current = this.repository.updateSessionState({
@@ -90,7 +90,7 @@ export class Orchestrator {
   }
 
   public async resolveApproval(input: ResolveApprovalInput): Promise<Session> {
-    const session = this.repository.findBySlackThread(input);
+    const session = this.repository.findByChannelThread(input);
     if (!session) {
       throw new Error('session not found for approval');
     }

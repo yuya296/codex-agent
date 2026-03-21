@@ -142,11 +142,11 @@ test('handleMessageEvent: file_share subtype is accepted and temporary directory
   const calls: string[] = [];
   const gateway = new Gateway(
     {
-      startSessionFromSlack: async () => {
+      startSession: async () => {
         calls.push('start');
         return createSession();
       },
-      continueSessionFromSlack: async () => {
+      continueSession: async () => {
         calls.push('continue');
         return createSession();
       },

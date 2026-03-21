@@ -8,11 +8,11 @@ test('Gateway: admin command posts English response and skips orchestrator', asy
 
   const gateway = new Gateway(
     {
-      startSessionFromSlack: async () => {
+      startSession: async () => {
         calls.push('start');
         throw new Error('should not be called');
       },
-      continueSessionFromSlack: async () => {
+      continueSession: async () => {
         calls.push('continue');
         throw new Error('should not be called');
       },
