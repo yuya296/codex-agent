@@ -21,28 +21,27 @@ app 自体は image 内の `/app` で動作し、Codex worker の作業対象も
 
 これらは bind mount です。host の通常 `.codex` や普段使いの Chrome profile は共有しません。
 
-## 必須環境変数
-
-- `SLACK_BOT_TOKEN`
-- `SLACK_APP_TOKEN`
+## 環境変数
 
 `.env.example` を `.env` にコピーして値を入れる運用で構いません。Docker Compose が `.env` を読みます。
 
-## 任意環境変数
-
-- `SLACK_AGENT_CHAT_STATUS_ENABLED` default: `false`
-- `DEBUG_SLACK_EVENTS` default: `false`
-- `DEBUG_WORKER_EVENTS` default: `false`
-- `DEBUG_WORKER_EVENT_DELTAS` default: `false`
-- `CODEX_HOME` default: `/root/.codex`
-- `CODEX_WORKER_COMMAND` default: `codex`
-- `CODEX_WORKER_ARGS` default: `app-server`
-- `CODEX_WORKER_CWD` default: `/app`
-- `WORKER_STREAM_EVENT_TIMEOUT_MS` default: `300000`
-- `SQLITE_PATH` default: `/data/app.sqlite`
-- `PORT`
-- `PLAYWRIGHT_AGENT_PROFILE_DIR` default: `/profiles/agent`
-- `PLAYWRIGHT_MCP_CONFIG` default: `/run/playwright/cli.config.json`
+| 変数 | 必須 | 既定値 | 用途 |
+|---|---|---|---|
+| `SLACK_BOT_TOKEN` | 必須 | なし | Slack Bot Token。メッセージ送信、DM 受信、ファイル操作に使う |
+| `SLACK_APP_TOKEN` | 必須 | なし | Slack App-Level Token。Socket Mode 接続に使う |
+| `SLACK_AGENT_CHAT_STATUS_ENABLED` | 任意 | `false` | `assistant.threads.setStatus` を使うときに `true` にする |
+| `DEBUG_SLACK_EVENTS` | 任意 | `false` | Slack event / client 呼び出しをログ出力する |
+| `DEBUG_WORKER_EVENTS` | 任意 | `false` | worker の主要イベントをログ出力する |
+| `DEBUG_WORKER_EVENT_DELTAS` | 任意 | `false` | 高頻度な delta イベントも追加でログ出力する |
+| `CODEX_HOME` | 任意 | `/root/.codex` | container 内の Codex 認証・設定ディレクトリ |
+| `CODEX_WORKER_COMMAND` | 任意 | `codex` | worker プロセス起動コマンド |
+| `CODEX_WORKER_ARGS` | 任意 | `app-server` | worker 起動時の引数 |
+| `CODEX_WORKER_CWD` | 任意 | `/app` | worker の作業ディレクトリ |
+| `WORKER_STREAM_EVENT_TIMEOUT_MS` | 任意 | `300000` | worker turn 内で無通信を許容する最大時間(ms) |
+| `SQLITE_PATH` | 任意 | `/data/app.sqlite` | SQLite ファイルの保存先 |
+| `PORT` | 任意 | なし | 必要な場合のみ app の待受ポートを明示する |
+| `PLAYWRIGHT_AGENT_PROFILE_DIR` | 任意 | `/profiles/agent` | Playwright 用ブラウザ profile の保存先 |
+| `PLAYWRIGHT_MCP_CONFIG` | 任意 | `/run/playwright/cli.config.json` | Playwright MCP の設定ファイルパス |
 
 ## 起動
 
