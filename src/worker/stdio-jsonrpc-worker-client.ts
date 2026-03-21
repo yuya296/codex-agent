@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import type { ApprovalDecision } from '../domain/types.js';
 import type { WorkerClient, WorkerRunEvent, WorkerRunOptions } from './types.js';
+import { TurnEventCollector, type StreamEvent } from './turn-event-collector.js';
 
 type JsonRpcId = number | string;
 
@@ -33,18 +34,11 @@ interface PendingRequest {
   reject: (error: Error) => void;
 }
 
-interface StreamEvent {
-  kind: 'request' | 'notification';
-  method: string;
-  params: Record<string, unknown>;
-  id?: JsonRpcId;
-  threadId?: string;
-  turnId?: string;
-}
+type WorkerStreamEvent = StreamEvent & { id?: JsonRpcId };
 
 interface StreamWaiter {
-  match: (event: StreamEvent) => boolean;
-  resolve: (event: StreamEvent) => void;
+  match: (event: WorkerStreamEvent) => boolean;
+  resolve: (event: WorkerStreamEvent) => void;
   reject: (error: Error) => void;
   timer: NodeJS.Timeout;
 }
@@ -98,7 +92,7 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
   private readonly child: ChildProcessWithoutNullStreams;
   private nextId = 1;
   private readonly pending = new Map<JsonRpcId, PendingRequest>();
-  private readonly streamBuffer: StreamEvent[] = [];
+  private readonly streamBuffer: WorkerStreamEvent[] = [];
   private readonly streamWaiters: StreamWaiter[] = [];
   private readonly loadedThreads = new Set<string>();
   private readonly activeTurnByThread = new Map<string, string>();
@@ -108,6 +102,7 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
   private readonly streamEventTimeoutMs: number;
   private readonly debugEvents: boolean;
   private readonly debugDeltaEvents: boolean;
+  private readonly turnEventCollector: TurnEventCollector;
 
   public constructor(command: string, args: string[] = [], cwd?: string, options: WorkerClientOptions = {}) {
     this.child = spawn(command, args, {
@@ -117,6 +112,26 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
     this.streamEventTimeoutMs = options.streamEventTimeoutMs ?? DEFAULT_STREAM_EVENT_TIMEOUT_MS;
     this.debugEvents = options.debugEvents ?? false;
     this.debugDeltaEvents = options.debugDeltaEvents ?? false;
+    this.turnEventCollector = new TurnEventCollector({
+      waitForStreamEvent: async (match) => this.waitForStreamEvent(match),
+      isTurnScopedEvent: (event, threadId, turnId) => this.isTurnScopedEvent(event, threadId, turnId),
+      buildStreamTimeoutError: (error, lastMatchedEvent) => this.buildStreamTimeoutError(error, lastMatchedEvent),
+      tryRegisterApproval: (streamEvent, threadId, turnId) => this.tryRegisterApproval(streamEvent, threadId, turnId),
+      buildApprovalPrompt: (streamEvent) => this.buildApprovalPrompt(streamEvent),
+      buildUnsupportedRequestError: (streamEvent) => this.buildUnsupportedRequestError(streamEvent),
+      emitWorkerEvent: async (out, event, runOptions) => this.emitWorkerEvent(out, event, runOptions),
+      shouldEmitDeltaProgress: (delta, progressMessage, lastEmittedProgressMessage) => this.shouldEmitDeltaProgress(
+        delta,
+        progressMessage,
+        lastEmittedProgressMessage,
+      ),
+      asString: (value) => this.asString(value),
+      asRecord: (value) => this.asRecord(value),
+      clearActiveTurn: (threadId, turnId) => {
+        this.activeTurnByThread.delete(threadId);
+        this.activeThreadByTurn.delete(turnId);
+      },
+    });
 
     const rl = createInterface({ input: this.child.stdout });
     rl.on('line', (line) => {
@@ -303,7 +318,7 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
     method: string,
     rawParams?: unknown,
     id?: JsonRpcId,
-  ): StreamEvent {
+  ): WorkerStreamEvent {
     const params = this.asRecord(rawParams);
     const { threadId, turnId } = this.extractThreadAndTurn(params);
 
@@ -339,7 +354,7 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
     return { threadId, turnId: turnIdFromTurn };
   }
 
-  private pushStreamEvent(event: StreamEvent): void {
+  private pushStreamEvent(event: WorkerStreamEvent): void {
     this.logStreamEvent(event);
     const waiterIndex = this.streamWaiters.findIndex((waiter) => waiter.match(event));
     if (waiterIndex >= 0) {
@@ -356,7 +371,7 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
     this.streamBuffer.push(event);
   }
 
-  private waitForStreamEvent(match: (event: StreamEvent) => boolean): Promise<StreamEvent> {
+  private waitForStreamEvent(match: (event: StreamEvent) => boolean): Promise<WorkerStreamEvent> {
     const bufferedIndex = this.streamBuffer.findIndex(match);
     if (bufferedIndex >= 0) {
       const [event] = this.streamBuffer.splice(bufferedIndex, 1);
@@ -365,7 +380,7 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
       }
     }
 
-    return new Promise<StreamEvent>((resolve, reject) => {
+    return new Promise<WorkerStreamEvent>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.removeWaiter(waiter);
         reject(new Error(`timed out waiting for worker stream event (${this.streamEventTimeoutMs}ms)`));
@@ -401,237 +416,7 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
     turnId: string,
     options?: WorkerRunOptions,
   ): Promise<WorkerRunEvent[]> {
-    const out: WorkerRunEvent[] = [];
-    let lastProgressMessage: string | null = null;
-    let finalMessage: string | null = null;
-    let lastMatchedEvent: StreamEvent | null = null;
-    let deltaProgressMessage = '';
-    let lastEmittedProgressMessage: string | null = null;
-
-    while (true) {
-      let streamEvent: StreamEvent;
-      try {
-        streamEvent = await this.waitForStreamEvent(
-          (event) => this.isTurnScopedEvent(event, threadId, turnId),
-        );
-      } catch (error) {
-        throw this.buildStreamTimeoutError(error, lastMatchedEvent);
-      }
-      lastMatchedEvent = streamEvent;
-
-      if (streamEvent.kind === 'request') {
-        await this.handleTurnRequestEvent(out, streamEvent, threadId, turnId, options);
-        return out;
-      }
-
-      const deltaHandled = await this.handleDeltaEvent(
-        out,
-        streamEvent,
-        options,
-        deltaProgressMessage,
-        lastProgressMessage,
-        lastEmittedProgressMessage,
-      );
-      if (deltaHandled) {
-        deltaProgressMessage = deltaHandled.deltaProgressMessage;
-        lastEmittedProgressMessage = deltaHandled.lastEmittedProgressMessage;
-        lastProgressMessage = deltaHandled.lastProgressMessage;
-        continue;
-      }
-
-      const completedItemHandled = await this.handleItemCompletedEvent(
-        out,
-        streamEvent,
-        options,
-        deltaProgressMessage,
-        lastProgressMessage,
-        lastEmittedProgressMessage,
-      );
-      if (completedItemHandled) {
-        deltaProgressMessage = completedItemHandled.deltaProgressMessage;
-        lastEmittedProgressMessage = completedItemHandled.lastEmittedProgressMessage;
-        lastProgressMessage = completedItemHandled.lastProgressMessage;
-        finalMessage = completedItemHandled.finalMessage;
-        continue;
-      }
-
-      if (streamEvent.method === METHODS.error) {
-        continue;
-      }
-
-      if (streamEvent.method === METHODS.turnCompleted) {
-        await this.handleTurnCompletedEvent(
-          out,
-          streamEvent,
-          threadId,
-          turnId,
-          options,
-          finalMessage,
-          lastProgressMessage,
-        );
-        return out;
-      }
-    }
-  }
-
-  private async handleTurnRequestEvent(
-    out: WorkerRunEvent[],
-    streamEvent: StreamEvent,
-    threadId: string,
-    turnId: string,
-    options?: WorkerRunOptions,
-  ): Promise<void> {
-    const approvalId = this.tryRegisterApproval(streamEvent, threadId, turnId);
-    if (approvalId) {
-      await this.emitWorkerEvent(out, {
-        type: 'approval_required',
-        approval_id: approvalId,
-        prompt: this.buildApprovalPrompt(streamEvent),
-      }, options);
-      return;
-    }
-
-    this.activeTurnByThread.delete(threadId);
-    this.activeThreadByTurn.delete(turnId);
-    await this.emitWorkerEvent(out, {
-      type: 'failed',
-      error: this.buildUnsupportedRequestError(streamEvent),
-    }, options);
-  }
-
-  private async handleDeltaEvent(
-    out: WorkerRunEvent[],
-    streamEvent: StreamEvent,
-    options: WorkerRunOptions | undefined,
-    deltaProgressMessage: string,
-    lastProgressMessage: string | null,
-    lastEmittedProgressMessage: string | null,
-  ): Promise<{
-    deltaProgressMessage: string;
-    lastEmittedProgressMessage: string | null;
-    lastProgressMessage: string | null;
-  } | null> {
-    if (streamEvent.method !== 'item/agentMessage/delta') {
-      return null;
-    }
-
-    const delta = this.asString(streamEvent.params.delta);
-    if (!delta) {
-      return {
-        deltaProgressMessage,
-        lastEmittedProgressMessage,
-        lastProgressMessage,
-      };
-    }
-
-    const nextDeltaProgressMessage = deltaProgressMessage + delta;
-    const progressMessage = nextDeltaProgressMessage.trim();
-    if (!this.shouldEmitDeltaProgress(delta, progressMessage, lastEmittedProgressMessage)) {
-      return {
-        deltaProgressMessage: nextDeltaProgressMessage,
-        lastEmittedProgressMessage,
-        lastProgressMessage,
-      };
-    }
-
-    await this.emitWorkerEvent(out, { type: 'progress', message: progressMessage }, options);
-    return {
-      deltaProgressMessage: nextDeltaProgressMessage,
-      lastEmittedProgressMessage: progressMessage,
-      lastProgressMessage: progressMessage,
-    };
-  }
-
-  private async handleItemCompletedEvent(
-    out: WorkerRunEvent[],
-    streamEvent: StreamEvent,
-    options: WorkerRunOptions | undefined,
-    deltaProgressMessage: string,
-    lastProgressMessage: string | null,
-    lastEmittedProgressMessage: string | null,
-  ): Promise<{
-    deltaProgressMessage: string;
-    lastEmittedProgressMessage: string | null;
-    lastProgressMessage: string | null;
-    finalMessage: string | null;
-  } | null> {
-    if (streamEvent.method !== METHODS.itemCompleted) {
-      return null;
-    }
-
-    const item = this.asRecord(streamEvent.params.item);
-    if (this.asString(item.type) !== 'agentMessage') {
-      return {
-        deltaProgressMessage,
-        lastEmittedProgressMessage,
-        lastProgressMessage,
-        finalMessage: null,
-      };
-    }
-
-    const text = this.asString(item.text);
-    if (!text) {
-      return {
-        deltaProgressMessage,
-        lastEmittedProgressMessage,
-        lastProgressMessage,
-        finalMessage: null,
-      };
-    }
-
-    const phase = this.asString(item.phase);
-    if (phase === 'final_answer') {
-      return {
-        deltaProgressMessage: text,
-        lastEmittedProgressMessage,
-        lastProgressMessage: null,
-        finalMessage: text,
-      };
-    }
-
-    if (text !== lastEmittedProgressMessage) {
-      await this.emitWorkerEvent(out, { type: 'progress', message: text }, options);
-      return {
-        deltaProgressMessage: text,
-        lastEmittedProgressMessage: text,
-        lastProgressMessage: text,
-        finalMessage: null,
-      };
-    }
-
-    return {
-      deltaProgressMessage: text,
-      lastEmittedProgressMessage,
-      lastProgressMessage: text,
-      finalMessage: null,
-    };
-  }
-
-  private async handleTurnCompletedEvent(
-    out: WorkerRunEvent[],
-    streamEvent: StreamEvent,
-    threadId: string,
-    turnId: string,
-    options: WorkerRunOptions | undefined,
-    finalMessage: string | null,
-    lastProgressMessage: string | null,
-  ): Promise<void> {
-    const turn = this.asRecord(streamEvent.params.turn);
-    const status = this.asString(turn.status);
-    this.activeTurnByThread.delete(threadId);
-    this.activeThreadByTurn.delete(turnId);
-
-    if (status === 'failed') {
-      const turnError = this.asRecord(turn.error);
-      const errorMessage = this.asString(turnError.message) ?? 'turn failed';
-      await this.emitWorkerEvent(out, { type: 'failed', error: errorMessage }, options);
-      return;
-    }
-
-    await this.emitWorkerEvent(out, {
-      type: 'completed',
-      message: finalMessage ?? lastProgressMessage ?? 'completed',
-    }, options);
+    return this.turnEventCollector.collect(threadId, turnId, options);
   }
 
   private async emitWorkerEvent(
@@ -665,7 +450,7 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
   }
 
   private tryRegisterApproval(
-    streamEvent: StreamEvent,
+    streamEvent: WorkerStreamEvent,
     fallbackThreadId?: string,
     fallbackTurnId?: string,
   ): string | null {
