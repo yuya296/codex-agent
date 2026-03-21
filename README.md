@@ -1,7 +1,9 @@
 # codex-agent
 
 Slack DM と Codex (`codex app-server`) をつなぐ最小構成のエージェントです。  
-構成は `gateway / orchestrator / sqlite / worker(codex app-server)` の MVP です。
+構成は `gateway / orchestrator / worker` を中心にした最小構成です。
+
+このリポジトリでは **ソースコードを SSoT (Single Source of Truth)** とし、`docs/` は思想、全体像、運用手順を補助する概要資料として扱います。
 
 ## 必要環境
 
@@ -52,11 +54,13 @@ export SLACK_APP_TOKEN='xapp-...'
 
 ## Docs
 
-- [仕様](./docs/spec.md)
-- [アーキテクチャ](./docs/architecture.md)
-- [図表](./docs/diagrams.md)
+- [Docs Guide](./docs/README.md)
+- [Architecture Overview](./docs/architecture_overview.md)
+- [Architecture](./docs/architecture.md)
+- [Spec](./docs/spec.md)
 - [Slack API 設定ガイド](./docs/slack-api-setup.md)
 - [Docker 運用ガイド](./docs/docker.md)
+- [Archive](./docs/archive/)
 
 必要な権限の要点:
 

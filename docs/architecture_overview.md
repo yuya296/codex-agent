@@ -54,4 +54,4 @@ flowchart LR
 - `worker` は複数インスタンスを取りうる内部境界として扱う
 - `codex app-server` は `worker` の内部ではなく外部システムとして扱う
 - 図中の複数 `worker` / `codex app-server` は多重性の表現であり、固定の 1:1 対応を意味しない
-- 線の意味は一律ではなく、`Slack <--> codex-agent` と `gateway <--> orchestrator`、`orchestrator <--> worker`、`worker <--> codex app-server` は協調関係を表す
+- 線の意味は一律ではなく、`Slack <--> gateway`、`gateway <--> orchestrator`、`orchestrator <--> worker`、`worker <--> codex app-server` は協調関係を表す
