@@ -20,32 +20,51 @@ Slack DM と Codex (`codex app-server`) をつなぐ最小構成のエージェ�
 npm install
 ```
 
-2. 対話式セットアップを実行
+2. 環境変数を設定
 
 ```bash
-npm run setup
+export SLACK_BOT_TOKEN='xoxb-...'
+export SLACK_APP_TOKEN='xapp-...'
 ```
 
-`setup` は以下を対話入力し、`~/.config/codex-agent/config.toml` に保存します。
+必要に応じて以下も設定します。
 
-- 必須: `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `CODEX_HOME`, `CODEX_WORKER_COMMAND`, `CODEX_WORKER_ARGS`, `SQLITE_PATH`
-- 任意: `CODEX_WORKER_CWD`, `PORT`
+- `CODEX_HOME`
+- `CODEX_WORKER_COMMAND`
+- `CODEX_WORKER_ARGS`
+- `CODEX_WORKER_CWD`
+- `WORKER_STREAM_EVENT_TIMEOUT_MS`
+- `SQLITE_PATH`
+- `SLACK_AGENT_CHAT_STATUS_ENABLED`
+- `DEBUG_SLACK_EVENTS`
+- `DEBUG_WORKER_EVENTS`
+- `DEBUG_WORKER_EVENT_DELTAS`
+- `PORT`
 
 デフォルト値:
 
 - `CODEX_WORKER_COMMAND`: `codex`
 - `CODEX_WORKER_ARGS`: `app-server`
 - `CODEX_HOME`: `$CODEX_HOME` があればそれ、なければ `~/.codex`
+- `WORKER_STREAM_EVENT_TIMEOUT_MS`: `300000`
+- `SLACK_AGENT_CHAT_STATUS_ENABLED`: `false`
 - `SQLITE_PATH`: `./data/app.sqlite`
 
-保存時の挙動:
+## Docs
 
-- 既存 `config.toml` がある場合は上書き確認あり
-- `~/.config/codex-agent` を自動作成
-- `config.toml` のパーミッションは `0600`
+- [仕様](./docs/spec.md)
+- [アーキテクチャ](./docs/architecture.md)
+- [図表](./docs/diagrams.md)
+- [Slack API 設定ガイド](./docs/slack-api-setup.md)
+- [Docker 運用ガイド](./docs/docker.md)
 
-Slack App 側の具体的な設定は以下を参照してください。  
-[Slack API 設定ガイド](./docs/slack-api-setup.md)
+必要な権限の要点:
+
+- App-Level Token scope: `connections:write`
+- Bot Token Scopes: `chat:write`, `im:history`, `files:write`, `files:read`
+- Event Subscription: `message.im`
+- `Agents & AI Apps`: ON
+- `Agent or Assistant`: OFF
 
 ## 起動前チェック
 
@@ -67,6 +86,26 @@ npm run doctor
 npm start
 ```
 
+## Docker で起動
+
+Slack token などは外部環境変数から渡します。
+
+`.env.example` を `.env` にコピーして使えます。
+
+```bash
+docker compose up -d --build
+docker compose exec app codex login --device-auth
+```
+
+Docker では次を使います。
+
+- Codex 認証: `./.docker/codex-home`
+- Playwright profile: `./.docker/playwright-agent-profile`
+- SQLite: `./.docker/data/app.sqlite`
+- app / worker の作業ディレクトリ: `/app`
+
+詳細は [docs/docker.md](./docs/docker.md) を参照してください。
+
 開発時:
 
 ```bash
@@ -75,32 +114,51 @@ npm run dev
 
 補足:
 
-- 設定読み込みは `config.toml` のみです（`.env` は読みません）
-- 起動時に `codex.home` の値が `CODEX_HOME` 環境変数として worker プロセスに渡されます
+- アプリ本体は環境変数をそのまま読みます
+- Docker Compose は `.env` を読めますが、ローカル実行時に `.env` を自動ロードはしません
+- 起動時に `CODEX_HOME` の値が worker プロセスにも渡されます
+- Docker は host repo を bind mount しないので、コード変更反映には再 build が必要です
 
-## 設定ファイル形式
+## 環境変数
 
-`~/.config/codex-agent/config.toml`
-
-```toml
-[slack]
-bot_token = "xoxb-..."
-app_token = "xapp-..."
-
-[codex]
-home = "~/.codex"
-worker_command = "codex"
-worker_args = ["app-server"]
-# worker_cwd = "/absolute/path" # optional
-
-[app]
-sqlite_path = "./data/app.sqlite"
-# port = 3000 # optional
+```bash
+SLACK_BOT_TOKEN=xoxb-...
+SLACK_APP_TOKEN=xapp-...
+DEBUG_SLACK_EVENTS=false
+DEBUG_WORKER_EVENTS=false
+DEBUG_WORKER_EVENT_DELTAS=false
+CODEX_HOME=/root/.codex
+CODEX_WORKER_COMMAND=codex
+CODEX_WORKER_ARGS="app-server"
+CODEX_WORKER_CWD=/app
+WORKER_STREAM_EVENT_TIMEOUT_MS=300000
+SQLITE_PATH=./data/app.sqlite
+SLACK_AGENT_CHAT_STATUS_ENABLED=false
+PORT=
 ```
+
+`SLACK_AGENT_CHAT_STATUS_ENABLED=true` にすると、進捗通知に `assistant.threads.setStatus` を使います。classic な DM スレッド返信を維持したい場合は、Slack App 側の `Agent or Assistant` は OFF にしてください。
+
+通常回答の completed メッセージは、送信直前に Markdown を Slack 向けテキストへ整形します。箇条書きは `* `、番号付きリストは `1. ` の行構造を保つようにしています。ローカル画像パス（`/tmp/...png` など）が含まれる場合は、本文から取り除いたうえで thread にファイル添付します。Slack で受け取った画像添付は bot token の `files:read` で download し、一時ファイルのパスを worker に渡します。approval と status は今回の変換対象外です。
+
+DM では管理コマンドも使えます。Slack の slash command ではなく通常メッセージとして送ります。先頭の空白は任意です。
+
+- `/help`
+- `/status`
+- `/doctor`
+- `/worker-restart`
+- `/codex-check-update`
+
+これらのレスポンスは英語です。
+
+`WORKER_STREAM_EVENT_TIMEOUT_MS` は worker の turn 内で無通信を許容する最大時間です。重い処理で 5 分が短い場合だけ伸ばしてください。
+
+`DEBUG_WORKER_EVENTS=true` にすると、worker から届いた turn 関連イベントを `[worker:event]` としてログ出力します。approval 待ち、サポート外の対話要求、silent timeout の切り分けに使えます。
+
+`DEBUG_WORKER_EVENT_DELTAS=true` を追加すると、`item/agentMessage/delta` などの高頻度イベントも出します。通常は `false` のままにしてください。
 
 ## npm scripts
 
-- `npm run setup`: 対話式設定
 - `npm run doctor`: 環境チェック
 - `npm start`: 本番起動
 - `npm run dev`: watch 起動

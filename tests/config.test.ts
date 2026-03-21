@@ -1,80 +1,60 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { cleanupDir, createTempDir } from './helpers.js';
-import { loadConfigFromToml } from '../src/config/index.js';
+import { join } from 'node:path';
+import { loadConfigFromEnv } from '../src/config/index.js';
 
-test('loadConfigFromToml: reads config and expands home paths', () => {
-  const tempDir = createTempDir();
-  const configPath = join(tempDir, 'config.toml');
+test('loadConfigFromEnv: reads config from env and expands home paths', () => {
+  const loaded = loadConfigFromEnv({
+    SLACK_BOT_TOKEN: 'xoxb-test',
+    SLACK_APP_TOKEN: 'xapp-test',
+    CODEX_HOME: '~/.codex',
+    CODEX_WORKER_COMMAND: 'codex',
+    CODEX_WORKER_ARGS: 'app-server --listen stdio://',
+    CODEX_WORKER_CWD: '~/workspace',
+    WORKER_STREAM_EVENT_TIMEOUT_MS: '600000',
+    SQLITE_PATH: '~/data/app.sqlite',
+    SLACK_AGENT_CHAT_STATUS_ENABLED: 'true',
+    PORT: '3000',
+  });
 
-  writeFileSync(
-    configPath,
-    [
-      '[slack]',
-      'bot_token = "xoxb-test"',
-      'app_token = "xapp-test"',
-      '',
-      '[codex]',
-      'home = "~/.codex"',
-      'worker_command = "codex"',
-      'worker_args = ["app-server", "--listen", "stdio://"]',
-      'worker_cwd = "~/workspace"',
-      '',
-      '[app]',
-      'sqlite_path = "~/data/app.sqlite"',
-      'port = 3000',
-      '',
-    ].join('\n'),
-  );
-
-  const loaded = loadConfigFromToml(configPath);
   assert.equal(loaded.slackBotToken, 'xoxb-test');
   assert.equal(loaded.slackAppToken, 'xapp-test');
   assert.equal(loaded.codexHome, join(homedir(), '.codex'));
   assert.deepEqual(loaded.workerArgs, ['app-server', '--listen', 'stdio://']);
   assert.equal(loaded.workerCwd, join(homedir(), 'workspace'));
+  assert.equal(loaded.workerStreamEventTimeoutMs, 600000);
   assert.equal(loaded.sqlitePath, join(homedir(), 'data', 'app.sqlite'));
+  assert.equal(loaded.slackAgentChatStatusEnabled, true);
   assert.equal(loaded.port, 3000);
-
-  cleanupDir(tempDir);
 });
 
-test('loadConfigFromToml: accepts worker_args as string and splits it', () => {
-  const tempDir = createTempDir();
-  const configPath = join(tempDir, 'config.toml');
+test('loadConfigFromEnv: applies defaults for optional values', () => {
+  const loaded = loadConfigFromEnv({
+    SLACK_BOT_TOKEN: 'xoxb-test',
+    SLACK_APP_TOKEN: 'xapp-test',
+  });
 
-  writeFileSync(
-    configPath,
-    [
-      '[slack]',
-      'bot_token = "xoxb-test"',
-      'app_token = "xapp-test"',
-      '',
-      '[codex]',
-      'home = "/tmp/.codex"',
-      'worker_command = "codex"',
-      'worker_args = "app-server --listen stdio://"',
-      '',
-      '[app]',
-      'sqlite_path = "./data/app.sqlite"',
-      '',
-    ].join('\n'),
+  assert.equal(loaded.codexHome, join(homedir(), '.codex'));
+  assert.equal(loaded.workerCommand, 'codex');
+  assert.deepEqual(loaded.workerArgs, ['app-server']);
+  assert.equal(loaded.sqlitePath, './data/app.sqlite');
+  assert.equal(loaded.workerStreamEventTimeoutMs, 300000);
+  assert.equal(loaded.slackAgentChatStatusEnabled, false);
+});
+
+test('loadConfigFromEnv: throws helpful message when required env is missing', () => {
+  assert.throws(() => loadConfigFromEnv({}), /SLACK_BOT_TOKEN is required/);
+});
+
+test('loadConfigFromEnv: rejects invalid boolean env values', () => {
+  assert.throws(
+    () =>
+      loadConfigFromEnv({
+        SLACK_BOT_TOKEN: 'xoxb-test',
+        SLACK_APP_TOKEN: 'xapp-test',
+        SLACK_AGENT_CHAT_STATUS_ENABLED: 'yes',
+      }),
+    /SLACK_AGENT_CHAT_STATUS_ENABLED must be boolean when provided/,
   );
-
-  const loaded = loadConfigFromToml(configPath);
-  assert.deepEqual(loaded.workerArgs, ['app-server', '--listen', 'stdio://']);
-
-  cleanupDir(tempDir);
-});
-
-test('loadConfigFromToml: throws helpful message when file does not exist', () => {
-  const tempDir = createTempDir();
-  const configPath = join(tempDir, 'missing.toml');
-
-  assert.throws(() => loadConfigFromToml(configPath), /Run 'npm run setup' first/);
-
-  cleanupDir(tempDir);
 });

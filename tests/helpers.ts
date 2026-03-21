@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { Session } from '../src/domain/types.js';
 import type { GatewayNotifier } from '../src/orchestrator/orchestrator.js';
-import type { WorkerClient, WorkerRunEvent } from '../src/worker/types.js';
+import type { WorkerClient, WorkerRunEvent, WorkerRunOptions } from '../src/worker/types.js';
 
 export function createTempDir(prefix = 'codex-agent-test-'): string {
   return mkdtempSync(join(tmpdir(), prefix));
@@ -29,17 +29,19 @@ export class MockWorkerClient implements WorkerClient {
 
   public sendUserMessageImpl: (
     input: { codex_thread_id: string; text: string; user_id: string },
+    options?: WorkerRunOptions,
   ) => Promise<WorkerRunEvent[]> = async ({ text }) => [{ type: 'completed', message: `done:${text}` }];
 
   public sendSteerMessageImpl: (
     input: { codex_thread_id: string; text: string; user_id: string },
+    options?: WorkerRunOptions,
   ) => Promise<WorkerRunEvent[]> = async ({ text }) => [{ type: 'completed', message: `steer:${text}` }];
 
   public sendApprovalDecisionImpl: (input: {
     codex_thread_id: string;
     approval_id: string;
     decision: 'approve' | 'reject';
-  }) => Promise<WorkerRunEvent[]> = async ({ decision }) => [
+  }, options?: WorkerRunOptions) => Promise<WorkerRunEvent[]> = async ({ decision }) => [
     { type: 'completed', message: `approval:${decision}` },
   ];
 
@@ -52,30 +54,30 @@ export class MockWorkerClient implements WorkerClient {
     codex_thread_id: string;
     text: string;
     user_id: string;
-  }): Promise<WorkerRunEvent[]> {
+  }, options?: WorkerRunOptions): Promise<WorkerRunEvent[]> {
     this.callLog.push('sendUserMessage');
     this.sendUserMessageCalls.push(input);
-    return this.sendUserMessageImpl(input);
+    return this.sendUserMessageImpl(input, options);
   }
 
   public async sendSteerMessage(input: {
     codex_thread_id: string;
     text: string;
     user_id: string;
-  }): Promise<WorkerRunEvent[]> {
+  }, options?: WorkerRunOptions): Promise<WorkerRunEvent[]> {
     this.callLog.push('sendSteerMessage');
     this.sendSteerMessageCalls.push(input);
-    return this.sendSteerMessageImpl(input);
+    return this.sendSteerMessageImpl(input, options);
   }
 
   public async sendApprovalDecision(input: {
     codex_thread_id: string;
     approval_id: string;
     decision: 'approve' | 'reject';
-  }): Promise<WorkerRunEvent[]> {
+  }, options?: WorkerRunOptions): Promise<WorkerRunEvent[]> {
     this.callLog.push('sendApprovalDecision');
     this.sendApprovalDecisionCalls.push(input);
-    return this.sendApprovalDecisionImpl(input);
+    return this.sendApprovalDecisionImpl(input, options);
   }
 
   public async close(): Promise<void> {

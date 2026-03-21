@@ -1,69 +1,49 @@
-import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import TOML from '@iarna/toml';
 
 export interface AppConfig {
   slackBotToken: string;
   slackAppToken: string;
   codexHome: string;
   sqlitePath: string;
+  slackAgentChatStatusEnabled: boolean;
   workerCommand: string;
   workerArgs: string[];
   workerCwd?: string;
+  workerStreamEventTimeoutMs: number;
   port?: number;
 }
 
-interface ConfigToml {
-  slack?: {
-    bot_token?: unknown;
-    app_token?: unknown;
-  };
-  codex?: {
-    home?: unknown;
-    worker_command?: unknown;
-    worker_args?: unknown;
-    worker_cwd?: unknown;
-  };
-  app?: {
-    sqlite_path?: unknown;
-    port?: unknown;
-  };
-}
-
-export const DEFAULT_CONFIG_PATH = join(homedir(), '.config', 'codex-agent', 'config.toml');
-
-export function loadConfigFromToml(filePath = DEFAULT_CONFIG_PATH): AppConfig {
-  if (!existsSync(filePath)) {
-    throw new Error(`config file not found: ${filePath}. Run 'npm run setup' first.`);
-  }
-
-  const raw = readFileSync(filePath, 'utf8');
-
-  let parsed: ConfigToml;
-  try {
-    parsed = TOML.parse(raw) as ConfigToml;
-  } catch (error) {
-    throw new Error(`failed to parse config.toml: ${String(error)}`);
-  }
-
-  const slackBotToken = readRequiredString(parsed.slack?.bot_token, 'slack.bot_token');
-  const slackAppToken = readRequiredString(parsed.slack?.app_token, 'slack.app_token');
-  const codexHome = expandHome(readRequiredString(parsed.codex?.home, 'codex.home'));
-  const workerCommand = readRequiredString(parsed.codex?.worker_command, 'codex.worker_command');
-  const workerArgs = parseWorkerArgs(parsed.codex?.worker_args);
-  const workerCwd = readOptionalString(parsed.codex?.worker_cwd, 'codex.worker_cwd');
-  const sqlitePath = expandHome(readRequiredString(parsed.app?.sqlite_path, 'app.sqlite_path'));
-  const port = parsePort(parsed.app?.port);
+export function loadConfigFromEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
+  const slackBotToken = readRequiredString(env.SLACK_BOT_TOKEN, 'SLACK_BOT_TOKEN');
+  const slackAppToken = readRequiredString(env.SLACK_APP_TOKEN, 'SLACK_APP_TOKEN');
+  const codexHome = expandHome(env.CODEX_HOME?.trim() || join(homedir(), '.codex'));
+  const workerCommand = env.CODEX_WORKER_COMMAND?.trim() || 'codex';
+  const workerArgs = parseWorkerArgs(env.CODEX_WORKER_ARGS ?? 'app-server');
+  const workerCwd = readOptionalString(env.CODEX_WORKER_CWD, 'CODEX_WORKER_CWD');
+  const workerStreamEventTimeoutMs = parsePositiveInteger(
+    env.WORKER_STREAM_EVENT_TIMEOUT_MS,
+    'WORKER_STREAM_EVENT_TIMEOUT_MS',
+    5 * 60 * 1000,
+  );
+  const sqlitePath = expandHome(env.SQLITE_PATH?.trim() || './data/app.sqlite');
+  const slackAgentChatStatusEnabled = parseOptionalBoolean(
+    env.SLACK_AGENT_CHAT_STATUS_ENABLED,
+    'SLACK_AGENT_CHAT_STATUS_ENABLED',
+    false,
+  );
+  const port = parsePort(env.PORT);
 
   return {
     slackBotToken,
     slackAppToken,
     codexHome,
     sqlitePath,
+    slackAgentChatStatusEnabled,
     workerCommand,
     workerArgs,
     workerCwd: workerCwd ? expandHome(workerCwd) : undefined,
+    workerStreamEventTimeoutMs,
     port,
   };
 }
@@ -102,11 +82,46 @@ function parsePort(value: unknown): number | undefined {
     return undefined;
   }
 
-  if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
-    throw new Error('app.port must be a positive integer when provided');
+  const asNumber = typeof value === 'number' ? value : Number(value);
+  if (!Number.isInteger(asNumber) || asNumber <= 0) {
+    throw new Error('PORT must be a positive integer when provided');
   }
 
-  return value;
+  return asNumber;
+}
+
+function parsePositiveInteger(value: unknown, fieldName: string, defaultValue: number): number {
+  if (value === undefined || value === null || value === '') {
+    return defaultValue;
+  }
+
+  const asNumber = typeof value === 'number' ? value : Number(value);
+  if (!Number.isInteger(asNumber) || asNumber <= 0) {
+    throw new Error(`${fieldName} must be a positive integer when provided`);
+  }
+
+  return asNumber;
+}
+
+function parseOptionalBoolean(value: unknown, fieldName: string, defaultValue: boolean): boolean {
+  if (value === undefined || value === null) {
+    return defaultValue;
+  }
+
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    if (value === 'true') {
+      return true;
+    }
+    if (value === 'false') {
+      return false;
+    }
+  }
+
+  throw new Error(`${fieldName} must be boolean when provided`);
 }
 
 function readRequiredString(value: unknown, fieldName: string): string {

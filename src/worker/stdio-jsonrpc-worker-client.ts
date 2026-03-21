@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import type { ApprovalDecision } from '../domain/types.js';
-import type { WorkerClient, WorkerRunEvent } from './types.js';
+import type { WorkerClient, WorkerRunEvent, WorkerRunOptions } from './types.js';
 
 type JsonRpcId = number | string;
 
@@ -56,6 +56,12 @@ interface PendingApproval {
   turnId: string;
 }
 
+interface WorkerClientOptions {
+  streamEventTimeoutMs?: number;
+  debugEvents?: boolean;
+  debugDeltaEvents?: boolean;
+}
+
 const METHODS = {
   initialize: 'initialize',
   threadStart: 'thread/start',
@@ -67,12 +73,26 @@ const METHODS = {
   fileChangeApprovalRequest: 'item/fileChange/requestApproval',
   applyPatchApprovalRequest: 'applyPatchApproval',
   execCommandApprovalRequest: 'execCommandApproval',
+  requestUserInput: 'item/tool/requestUserInput',
+  elicitationRequest: 'mcpServer/elicitation/request',
+  dynamicToolCall: 'item/tool/call',
+  authRefreshRequest: 'account/chatgptAuthTokens/refresh',
   turnCompleted: 'turn/completed',
   itemCompleted: 'item/completed',
   error: 'error',
 } as const;
-
-const STREAM_EVENT_TIMEOUT_MS = 5 * 60 * 1000;
+const DEFAULT_STREAM_EVENT_TIMEOUT_MS = 5 * 60 * 1000;
+const IGNORED_STDERR_PATTERNS = [
+  'failed to refresh available models: timeout waiting for child process to exit',
+] as const;
+const NOISY_DELTA_METHODS = new Set<string>([
+  'item/agentMessage/delta',
+  'item/plan/delta',
+  'item/commandExecution/outputDelta',
+  'item/fileChange/outputDelta',
+  'item/reasoning/summaryTextDelta',
+  'item/reasoning/textDelta',
+]);
 
 export class StdioJsonRpcWorkerClient implements WorkerClient {
   private readonly child: ChildProcessWithoutNullStreams;
@@ -85,12 +105,18 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
   private readonly activeThreadByTurn = new Map<string, string>();
   private readonly pendingApprovals = new Map<string, PendingApproval>();
   private initializePromise: Promise<void> | null = null;
+  private readonly streamEventTimeoutMs: number;
+  private readonly debugEvents: boolean;
+  private readonly debugDeltaEvents: boolean;
 
-  public constructor(command: string, args: string[] = [], cwd?: string) {
+  public constructor(command: string, args: string[] = [], cwd?: string, options: WorkerClientOptions = {}) {
     this.child = spawn(command, args, {
       cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
+    this.streamEventTimeoutMs = options.streamEventTimeoutMs ?? DEFAULT_STREAM_EVENT_TIMEOUT_MS;
+    this.debugEvents = options.debugEvents ?? false;
+    this.debugDeltaEvents = options.debugDeltaEvents ?? false;
 
     const rl = createInterface({ input: this.child.stdout });
     rl.on('line', (line) => {
@@ -113,6 +139,9 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
     this.child.stderr.on('data', (chunk) => {
       const text = chunk.toString('utf8').trim();
       if (text.length > 0) {
+        if (IGNORED_STDERR_PATTERNS.some((pattern) => text.includes(pattern))) {
+          return;
+        }
         // eslint-disable-next-line no-console
         console.error(`[worker] ${text}`);
       }
@@ -136,7 +165,7 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
     codex_thread_id: string;
     text: string;
     user_id: string;
-  }): Promise<WorkerRunEvent[]> {
+  }, options?: WorkerRunOptions): Promise<WorkerRunEvent[]> {
     await this.ensureInitialized();
     await this.ensureThreadLoaded(input.codex_thread_id);
 
@@ -149,20 +178,20 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
     this.activeTurnByThread.set(input.codex_thread_id, turnId);
     this.activeThreadByTurn.set(turnId, input.codex_thread_id);
 
-    return this.collectTurnEvents(input.codex_thread_id, turnId);
+    return this.collectTurnEvents(input.codex_thread_id, turnId, options);
   }
 
   public async sendSteerMessage(input: {
     codex_thread_id: string;
     text: string;
     user_id: string;
-  }): Promise<WorkerRunEvent[]> {
+  }, options?: WorkerRunOptions): Promise<WorkerRunEvent[]> {
     await this.ensureInitialized();
     await this.ensureThreadLoaded(input.codex_thread_id);
 
     const activeTurnId = this.activeTurnByThread.get(input.codex_thread_id);
     if (!activeTurnId) {
-      return this.sendUserMessage(input);
+      return this.sendUserMessage(input, options);
     }
 
     await this.request(METHODS.turnSteer, {
@@ -171,14 +200,14 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
       input: [this.buildTextInput(input.text)],
     });
 
-    return this.collectTurnEvents(input.codex_thread_id, activeTurnId);
+    return this.collectTurnEvents(input.codex_thread_id, activeTurnId, options);
   }
 
   public async sendApprovalDecision(input: {
     codex_thread_id: string;
     approval_id: string;
     decision: ApprovalDecision;
-  }): Promise<WorkerRunEvent[]> {
+  }, options?: WorkerRunOptions): Promise<WorkerRunEvent[]> {
     await this.ensureInitialized();
 
     const pendingApproval = this.pendingApprovals.get(input.approval_id);
@@ -193,7 +222,7 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
       this.buildApprovalResponse(pendingApproval.method, input.decision),
     );
 
-    return this.collectTurnEvents(pendingApproval.threadId, pendingApproval.turnId);
+    return this.collectTurnEvents(pendingApproval.threadId, pendingApproval.turnId, options);
   }
 
   public async close(): Promise<void> {
@@ -292,9 +321,9 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
     threadId?: string;
     turnId?: string;
   } {
-    let threadId = this.asString(params.threadId);
+    let threadId = this.asString(params.threadId) ?? this.asString(params.thread_id);
 
-    const turnIdDirect = this.asString(params.turnId);
+    const turnIdDirect = this.asString(params.turnId) ?? this.asString(params.turn_id);
     if (turnIdDirect) {
       if (!threadId) {
         threadId = this.activeThreadByTurn.get(turnIdDirect);
@@ -311,6 +340,7 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
   }
 
   private pushStreamEvent(event: StreamEvent): void {
+    this.logStreamEvent(event);
     const waiterIndex = this.streamWaiters.findIndex((waiter) => waiter.match(event));
     if (waiterIndex >= 0) {
       const [waiter] = this.streamWaiters.splice(waiterIndex, 1);
@@ -338,8 +368,8 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
     return new Promise<StreamEvent>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.removeWaiter(waiter);
-        reject(new Error(`timed out waiting for worker stream event (${STREAM_EVENT_TIMEOUT_MS}ms)`));
-      }, STREAM_EVENT_TIMEOUT_MS);
+        reject(new Error(`timed out waiting for worker stream event (${this.streamEventTimeoutMs}ms)`));
+      }, this.streamEventTimeoutMs);
 
       const waiter: StreamWaiter = { match, resolve, reject, timer };
       this.streamWaiters.push(waiter);
@@ -353,26 +383,76 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
     }
   }
 
-  private async collectTurnEvents(threadId: string, turnId: string): Promise<WorkerRunEvent[]> {
+  private isTurnScopedEvent(event: StreamEvent, threadId: string, turnId: string): boolean {
+    const threadMatches = !event.threadId || event.threadId === threadId;
+    if (!threadMatches) {
+      return false;
+    }
+
+    if (event.turnId === turnId) {
+      return true;
+    }
+
+    return event.kind === 'request' && !event.turnId;
+  }
+
+  private async collectTurnEvents(
+    threadId: string,
+    turnId: string,
+    options?: WorkerRunOptions,
+  ): Promise<WorkerRunEvent[]> {
     const out: WorkerRunEvent[] = [];
     let lastProgressMessage: string | null = null;
     let finalMessage: string | null = null;
+    let lastMatchedEvent: StreamEvent | null = null;
+    let deltaProgressMessage = '';
+    let lastEmittedProgressMessage: string | null = null;
 
     while (true) {
-      const streamEvent = await this.waitForStreamEvent(
-        (event) => event.turnId === turnId && (!event.threadId || event.threadId === threadId),
-      );
+      let streamEvent: StreamEvent;
+      try {
+        streamEvent = await this.waitForStreamEvent(
+          (event) => this.isTurnScopedEvent(event, threadId, turnId),
+        );
+      } catch (error) {
+        throw this.buildStreamTimeoutError(error, lastMatchedEvent);
+      }
+      lastMatchedEvent = streamEvent;
 
       if (streamEvent.kind === 'request') {
-        const approvalId = this.tryRegisterApproval(streamEvent);
+        const approvalId = this.tryRegisterApproval(streamEvent, threadId, turnId);
         if (approvalId) {
-          out.push({
+          await this.emitWorkerEvent(out, {
             type: 'approval_required',
             approval_id: approvalId,
             prompt: this.buildApprovalPrompt(streamEvent),
-          });
+          }, options);
           return out;
         }
+        this.activeTurnByThread.delete(threadId);
+        this.activeThreadByTurn.delete(turnId);
+        await this.emitWorkerEvent(out, {
+          type: 'failed',
+          error: this.buildUnsupportedRequestError(streamEvent),
+        }, options);
+        return out;
+      }
+
+      if (streamEvent.method === 'item/agentMessage/delta') {
+        const delta = this.asString(streamEvent.params.delta);
+        if (!delta) {
+          continue;
+        }
+
+        deltaProgressMessage += delta;
+        const progressMessage = deltaProgressMessage.trim();
+        if (!this.shouldEmitDeltaProgress(delta, progressMessage, lastEmittedProgressMessage)) {
+          continue;
+        }
+
+        lastProgressMessage = progressMessage;
+        lastEmittedProgressMessage = progressMessage;
+        await this.emitWorkerEvent(out, { type: 'progress', message: progressMessage }, options);
         continue;
       }
 
@@ -389,18 +469,17 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
             continue;
           }
           lastProgressMessage = text;
-          out.push({ type: 'progress', message: text });
+          deltaProgressMessage = text;
+          if (text !== lastEmittedProgressMessage) {
+            lastEmittedProgressMessage = text;
+            await this.emitWorkerEvent(out, { type: 'progress', message: text }, options);
+          }
         }
         continue;
       }
 
       if (streamEvent.method === METHODS.error) {
-        const error = this.asRecord(streamEvent.params.error);
-        const message = this.asString(error.message) ?? 'worker reported an error';
-        this.activeTurnByThread.delete(threadId);
-        this.activeThreadByTurn.delete(turnId);
-        out.push({ type: 'failed', error: message });
-        return out;
+        continue;
       }
 
       if (streamEvent.method === METHODS.turnCompleted) {
@@ -412,20 +491,54 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
         if (status === 'failed') {
           const turnError = this.asRecord(turn.error);
           const errorMessage = this.asString(turnError.message) ?? 'turn failed';
-          out.push({ type: 'failed', error: errorMessage });
+          await this.emitWorkerEvent(out, { type: 'failed', error: errorMessage }, options);
           return out;
         }
 
-        out.push({
+        await this.emitWorkerEvent(out, {
           type: 'completed',
           message: finalMessage ?? lastProgressMessage ?? 'completed',
-        });
+        }, options);
         return out;
       }
     }
   }
 
-  private tryRegisterApproval(streamEvent: StreamEvent): string | null {
+  private async emitWorkerEvent(
+    out: WorkerRunEvent[],
+    event: WorkerRunEvent,
+    options?: WorkerRunOptions,
+  ): Promise<void> {
+    out.push(event);
+    await options?.onEvent?.(event);
+  }
+
+  private shouldEmitDeltaProgress(
+    delta: string,
+    progressMessage: string,
+    lastEmittedProgressMessage: string | null,
+  ): boolean {
+    if (!progressMessage) {
+      return false;
+    }
+
+    if (progressMessage === lastEmittedProgressMessage) {
+      return false;
+    }
+
+    if (!lastEmittedProgressMessage) {
+      return progressMessage.length >= 8 || /[。！？\n]/u.test(delta);
+    }
+
+    const growth = progressMessage.length - lastEmittedProgressMessage.length;
+    return growth >= 12 || /[。！？\n]/u.test(delta);
+  }
+
+  private tryRegisterApproval(
+    streamEvent: StreamEvent,
+    fallbackThreadId?: string,
+    fallbackTurnId?: string,
+  ): string | null {
     if (
       streamEvent.method !== METHODS.commandApprovalRequest
       && streamEvent.method !== METHODS.fileChangeApprovalRequest
@@ -437,18 +550,23 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
 
     const approvalId =
       this.asString(streamEvent.params.approvalId)
+      ?? this.asString(streamEvent.params.approval_id)
       ?? this.asString(streamEvent.params.itemId)
+      ?? this.asString(streamEvent.params.item_id)
       ?? `request-${String(streamEvent.id ?? '')}`;
 
-    if (!streamEvent.id || !streamEvent.threadId || !streamEvent.turnId) {
+    const resolvedThreadId = streamEvent.threadId ?? fallbackThreadId;
+    const resolvedTurnId = streamEvent.turnId ?? fallbackTurnId;
+
+    if (streamEvent.id === undefined || streamEvent.id === null || !resolvedThreadId || !resolvedTurnId) {
       return null;
     }
 
     this.pendingApprovals.set(approvalId, {
       requestId: streamEvent.id,
       method: streamEvent.method,
-      threadId: streamEvent.threadId,
-      turnId: streamEvent.turnId,
+      threadId: resolvedThreadId,
+      turnId: resolvedTurnId,
     });
 
     return approvalId;
@@ -456,10 +574,10 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
 
   private buildApprovalPrompt(streamEvent: StreamEvent): string {
     const reason = this.asString(streamEvent.params.reason);
-    const command = this.asString(streamEvent.params.command);
+    const command = this.readCommand(streamEvent.params.command);
 
     if (reason && command) {
-      return `${reason}\n\`${command}\``;
+      return `${reason}\n${this.formatCommandCodeBlock(command)}`;
     }
 
     if (reason) {
@@ -467,10 +585,130 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
     }
 
     if (command) {
-      return `Approval required for command:\n\`${command}\``;
+      return `Approval required for command:\n${this.formatCommandCodeBlock(command)}`;
     }
 
     return 'Approval required to continue.';
+  }
+
+  private formatCommandCodeBlock(command: string): string {
+    return `\`\`\`\n${command}\n\`\`\``;
+  }
+
+  private readCommand(value: unknown): string | null {
+    if (typeof value === 'string') {
+      return value;
+    }
+
+    if (Array.isArray(value)) {
+      const parts = value.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0);
+      if (parts.length > 0) {
+        return parts.join(' ');
+      }
+    }
+
+    return null;
+  }
+
+  private buildUnsupportedRequestError(streamEvent: StreamEvent): string {
+    const details = this.summarizeEvent(streamEvent);
+    return `worker requested unsupported client interaction: ${streamEvent.method}${details ? ` (${details})` : ''}`;
+  }
+
+  private buildStreamTimeoutError(error: unknown, lastMatchedEvent: StreamEvent | null): Error {
+    const baseMessage = error instanceof Error ? error.message : String(error);
+    if (!baseMessage.includes('timed out waiting for worker stream event')) {
+      return error instanceof Error ? error : new Error(baseMessage);
+    }
+
+    if (!lastMatchedEvent) {
+      return new Error(`${baseMessage}; no turn-scoped worker event was received before timeout`);
+    }
+
+    const details = this.summarizeEvent(lastMatchedEvent);
+    return new Error(
+      `${baseMessage}; last turn event was ${lastMatchedEvent.kind}:${lastMatchedEvent.method}${details ? ` (${details})` : ''}`,
+    );
+  }
+
+  private summarizeEvent(event: StreamEvent): string {
+    const topLevelMessage = this.asString(event.params.message);
+    if (topLevelMessage) {
+      return this.truncate(topLevelMessage);
+    }
+
+    const errorObject = this.asRecord(event.params.error);
+    const errorMessage = this.asString(errorObject.message);
+    if (errorMessage) {
+      return this.truncate(errorMessage);
+    }
+
+    const errorString = this.asString(event.params.error);
+    if (errorString) {
+      return this.truncate(errorString);
+    }
+
+    const delta = this.asString(event.params.delta);
+    if (delta) {
+      return this.truncate(delta);
+    }
+
+    const reason = this.asString(event.params.reason);
+    const command = this.asString(event.params.command);
+    if (reason && command) {
+      return this.truncate(`${reason}; command=${command}`);
+    }
+    if (reason) {
+      return this.truncate(reason);
+    }
+    if (command) {
+      return this.truncate(`command=${command}`);
+    }
+
+    const questions = Array.isArray(event.params.questions) ? event.params.questions.length : null;
+    if (questions !== null) {
+      return `${questions} question(s)`;
+    }
+
+    const item = this.asRecord(event.params.item);
+    const itemType = this.asString(item.type);
+    const itemText = this.asString(item.text);
+    if (itemType && itemText) {
+      return this.truncate(`${itemType}:${itemText}`);
+    }
+    if (itemType) {
+      return itemType;
+    }
+
+    const status = this.asString(this.asRecord(event.params.turn).status);
+    if (status) {
+      return `status=${status}`;
+    }
+
+    return '';
+  }
+
+  private truncate(text: string, max = 120): string {
+    return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+  }
+
+  private logStreamEvent(event: StreamEvent): void {
+    if (!this.debugEvents) {
+      return;
+    }
+
+    if (NOISY_DELTA_METHODS.has(event.method) && !this.debugDeltaEvents) {
+      return;
+    }
+
+    // eslint-disable-next-line no-console
+    console.log('[worker:event]', JSON.stringify({
+      kind: event.kind,
+      method: event.method,
+      threadId: event.threadId ?? null,
+      turnId: event.turnId ?? null,
+      details: this.summarizeEvent(event) || null,
+    }));
   }
 
   private buildApprovalResponse(method: string, decision: ApprovalDecision): Record<string, unknown> {
