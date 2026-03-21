@@ -16,36 +16,42 @@
 flowchart LR
   Slack["Slack"]
 
-  subgraph Gateway["gateway"]
-    direction TB
+  subgraph CodexAgent["codex-agent"]
+    direction LR
 
-    G1["channel adapter"]
-    G2["presentation"]
+    Gateway["&lt;gateway&gt;<br/>- channel adapter<br/>- presentation"]
+    Orchestrator["&lt;orchestrator&gt;<br/>- session manager<br/>- repository (sqlite)"]
+    Worker1["&lt;worker&gt;"]
+    Worker2["&lt;worker&gt;"]
+    Worker3["&lt;worker&gt;"]
+
+    Gateway <--> Orchestrator
+    Orchestrator <--> Worker1
+    Orchestrator <--> Worker2
+    Orchestrator <--> Worker3
   end
 
-  subgraph Orchestrator["orchestrator"]
+  subgraph CodexCluster["codex app-server"]
     direction TB
 
-    O1["session manager"]
-    O2["repository (sqlite)"]
-  end
-
-  subgraph Worker["worker"]
-    direction TB
-
-    W1["thin wrapper"]
-    W2["codex app-server"]
+    Codex1["codex app-server"]
+    Codex2["codex app-server"]
+    Codex3["codex app-server"]
   end
 
   Slack <-->|socket-mode| Gateway
-  Gateway <--> Orchestrator
-  Orchestrator <-->|1:n| Worker
+  Worker1 <--> Codex1
+  Worker2 <--> Codex2
+  Worker3 <--> Codex3
 ```
 
 ## Notes
 
+- `codex-agent` の内部構成は `gateway / orchestrator / worker` の3区分で捉える
 - `gateway` は `channel adapter + presentation` として捉える
 - `channel adapter` の中に runtime と coordination を含める
 - `orchestrator` が session state と persistence の owner
-- `worker` は Codex app-server に対する薄い wrapper として扱う
-- 線の意味は一律ではなく、`Gateway <--> Orchestrator` と `Orchestrator <--> Worker` は協調関係、`session manager --> repository` は依存関係を表す
+- `worker` は複数インスタンスを取りうる内部境界として扱う
+- `codex app-server` は `worker` の内部ではなく外部システムとして扱う
+- 図中の複数 `worker` / `codex app-server` は多重性の表現であり、固定の 1:1 対応を意味しない
+- 線の意味は一律ではなく、`Slack <--> codex-agent` と `gateway <--> orchestrator`、`orchestrator <--> worker`、`worker <--> codex app-server` は協調関係を表す
