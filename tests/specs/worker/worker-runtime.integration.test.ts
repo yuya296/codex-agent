@@ -1,14 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
-import { StdioJsonRpcWorkerClient } from '../src/worker/stdio-jsonrpc-worker-client.js';
-import type { WorkerRunEvent } from '../src/worker/types.js';
+import { StdioJsonRpcWorkerClient } from '../../../src/worker/stdio-jsonrpc-worker-client.js';
+import type { WorkerRunEvent } from '../../../src/worker/types.js';
 
 function fixturePath(): string {
-  return fileURLToPath(new URL('./fixtures/mock-worker.mjs', import.meta.url));
+  return fileURLToPath(new URL('../../fixtures/mock-worker.mjs', import.meta.url));
 }
 
-test('worker client: resumes thread before turn/start when local cache is empty', async () => {
+test('worker runtime resumes a known thread before sending a new user message', async () => {
   const first = new StdioJsonRpcWorkerClient(process.execPath, [fixturePath()]);
   const { codex_thread_id } = await first.createThread();
   await first.close();
@@ -26,7 +26,7 @@ test('worker client: resumes thread before turn/start when local cache is empty'
   await second.close();
 });
 
-test('worker client: unsupported user-input request fails immediately with method context', async () => {
+test('worker runtime fails immediately with method context when user-input requests are unsupported', async () => {
   const worker = new StdioJsonRpcWorkerClient(process.execPath, [fixturePath()]);
   const { codex_thread_id } = await worker.createThread();
 
@@ -46,7 +46,7 @@ test('worker client: unsupported user-input request fails immediately with metho
   await worker.close();
 });
 
-test('worker client: approval request without explicit thread/turn ids still becomes approval_required', async () => {
+test('worker runtime still surfaces approval requests when thread and turn ids are omitted', async () => {
   const worker = new StdioJsonRpcWorkerClient(process.execPath, [fixturePath()]);
   const { codex_thread_id } = await worker.createThread();
 
@@ -67,7 +67,7 @@ test('worker client: approval request without explicit thread/turn ids still bec
   await worker.close();
 });
 
-test('worker client: timeout includes last turn event details', async () => {
+test('worker runtime includes the last matched turn event when a stream timeout is raised for diagnosis', async () => {
   const worker = new StdioJsonRpcWorkerClient(
     process.execPath,
     [fixturePath()],
@@ -88,7 +88,7 @@ test('worker client: timeout includes last turn event details', async () => {
   await worker.close();
 });
 
-test('worker client: agentMessage delta emits streaming progress callbacks', async () => {
+test('worker runtime streams progress callbacks from agent message deltas before completion', async () => {
   const worker = new StdioJsonRpcWorkerClient(process.execPath, [fixturePath()]);
   const { codex_thread_id } = await worker.createThread();
   const streamed: WorkerRunEvent[] = [];
@@ -115,7 +115,7 @@ test('worker client: agentMessage delta emits streaming progress callbacks', asy
   await worker.close();
 });
 
-test('worker client: failed turn is emitted to streaming callbacks', async () => {
+test('worker runtime forwards failed turns to both streaming callbacks and return values', async () => {
   const worker = new StdioJsonRpcWorkerClient(process.execPath, [fixturePath()]);
   const { codex_thread_id } = await worker.createThread();
   const streamed: WorkerRunEvent[] = [];
@@ -139,7 +139,7 @@ test('worker client: failed turn is emitted to streaming callbacks', async () =>
   await worker.close();
 });
 
-test('worker client: non-fatal error notification does not fail a completed turn', async () => {
+test('worker runtime keeps a completed run successful when later error notifications are non-fatal', async () => {
   const worker = new StdioJsonRpcWorkerClient(process.execPath, [fixturePath()]);
   const { codex_thread_id } = await worker.createThread();
 

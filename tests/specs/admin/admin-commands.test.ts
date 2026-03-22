@@ -3,16 +3,16 @@ import assert from 'node:assert/strict';
 import {
   createAdminCommandHandler,
   parseAdminCommand,
-} from '../src/admin/commands.js';
+} from '../../../src/admin/commands.js';
 
-test('parseAdminCommand: supports leading space before slash command', () => {
+test('admin commands accept slash command syntax even when the input starts with leading whitespace', () => {
   assert.deepEqual(parseAdminCommand(' /help'), { name: 'help' });
   assert.deepEqual(parseAdminCommand('/status'), { name: 'status' });
   assert.deepEqual(parseAdminCommand('  /worker-restart now'), { name: 'worker-restart' });
   assert.equal(parseAdminCommand('hello'), null);
 });
 
-test('createAdminCommandHandler: formats help and status in English', async () => {
+test('admin commands render help and status responses as operator-facing English text', async () => {
   const handler = createAdminCommandHandler({
     getStatusContext: async () => ({
       processUptimeSeconds: 12.7,

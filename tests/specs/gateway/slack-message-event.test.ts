@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { appendDownloadedImagesToText, toSlackMessageEvent } from '../src/gateway/bolt.js';
+import { appendDownloadedImagesToText, toSlackMessageEvent } from '../../../src/gateway/bolt.js';
 
-test('toSlackMessageEvent maps threaded dm payload', () => {
+test('Slack message event mapping turns threaded DM payloads into internal message events', () => {
   assert.deepEqual(
     toSlackMessageEvent({
       team: 'T1',
@@ -29,7 +29,7 @@ test('toSlackMessageEvent maps threaded dm payload', () => {
   );
 });
 
-test('toSlackMessageEvent returns null when required identity fields are missing', () => {
+test('Slack message event mapping ignores events that do not include identity fields', () => {
   assert.equal(
     toSlackMessageEvent({
       channel: 'D1',
@@ -41,7 +41,7 @@ test('toSlackMessageEvent returns null when required identity fields are missing
   );
 });
 
-test('toSlackMessageEvent allows empty text for file downloads', () => {
+test('Slack message event mapping allows empty text when attached files are the real payload', () => {
   assert.deepEqual(
     toSlackMessageEvent({
       team: 'T1',
@@ -65,7 +65,7 @@ test('toSlackMessageEvent allows empty text for file downloads', () => {
   );
 });
 
-test('toSlackMessageEvent maps file_share dm payload', () => {
+test('Slack message event mapping accepts file_share DMs as message events', () => {
   assert.deepEqual(
     toSlackMessageEvent({
       team: 'T1',
@@ -91,7 +91,7 @@ test('toSlackMessageEvent maps file_share dm payload', () => {
   );
 });
 
-test('appendDownloadedImagesToText appends downloaded image paths to text', () => {
+test('Slack message event mapping appends downloaded image paths as an attachment section', () => {
   assert.equal(
     appendDownloadedImagesToText('本文', [
       { path: '/tmp/weather.png', name: 'weather.png', mimetype: 'image/png' },

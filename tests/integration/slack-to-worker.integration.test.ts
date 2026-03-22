@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Gateway, type SlackPublisher } from '../src/gateway/gateway.js';
-import { Orchestrator } from '../src/orchestrator/orchestrator.js';
-import { SessionRepository } from '../src/repository/session-repository.js';
-import { StdioJsonRpcWorkerClient } from '../src/worker/stdio-jsonrpc-worker-client.js';
-import { cleanupDir, createTempDir } from './helpers.js';
+import { Gateway, type SlackPublisher } from '../../src/gateway/gateway.js';
+import { Orchestrator } from '../../src/orchestrator/orchestrator.js';
+import { SessionRepository } from '../../src/repository/session-repository.js';
+import { StdioJsonRpcWorkerClient } from '../../src/worker/stdio-jsonrpc-worker-client.js';
+import { cleanupDir, createTempDir } from '../support/helpers.js';
 
 class InMemorySlackPublisher implements SlackPublisher {
   public readonly posted: Array<{
@@ -56,10 +56,10 @@ class InMemorySlackPublisher implements SlackPublisher {
 }
 
 function fixturePath(): string {
-  return fileURLToPath(new URL('./fixtures/mock-worker.mjs', import.meta.url));
+  return fileURLToPath(new URL('../fixtures/mock-worker.mjs', import.meta.url));
 }
 
-test('integration: slack event -> gateway -> orchestrator -> stdio worker -> gateway notifications', async () => {
+test('integration routes a Slack message through gateway, orchestrator, and worker before returning thread updates', async () => {
   const tempDir = createTempDir();
   const repository = new SessionRepository(join(tempDir, 'app.sqlite'));
   const worker = new StdioJsonRpcWorkerClient(process.execPath, [fixturePath()]);
@@ -125,7 +125,7 @@ test('integration: slack event -> gateway -> orchestrator -> stdio worker -> gat
   cleanupDir(tempDir);
 });
 
-test('integration: assistant_thread.thread_ts is used as slack root thread ts', async () => {
+test('integration uses assistant_thread.thread_ts as the Slack root thread when that value is available', async () => {
   const tempDir = createTempDir();
   const repository = new SessionRepository(join(tempDir, 'app.sqlite'));
   const worker = new StdioJsonRpcWorkerClient(process.execPath, [fixturePath()]);
@@ -170,7 +170,7 @@ test('integration: assistant_thread.thread_ts is used as slack root thread ts', 
   cleanupDir(tempDir);
 });
 
-test('integration: initial assistant_thread.thread_ts starts a new session when none exists', async () => {
+test('integration starts a new session for an inherited assistant thread when no mapping exists yet', async () => {
   const tempDir = createTempDir();
   const repository = new SessionRepository(join(tempDir, 'app.sqlite'));
   const worker = new StdioJsonRpcWorkerClient(process.execPath, [fixturePath()]);
@@ -205,7 +205,7 @@ test('integration: initial assistant_thread.thread_ts starts a new session when 
   cleanupDir(tempDir);
 });
 
-test('integration: dm message with inherited thread_ts but no parent_user_id starts a new session', async () => {
+test('integration treats a DM with thread_ts but without parent_user_id as a new session', async () => {
   const tempDir = createTempDir();
   const repository = new SessionRepository(join(tempDir, 'app.sqlite'));
   const worker = new StdioJsonRpcWorkerClient(process.execPath, [fixturePath()]);
@@ -247,7 +247,7 @@ test('integration: dm message with inherited thread_ts but no parent_user_id sta
   cleanupDir(tempDir);
 });
 
-test('integration: completed markdown is converted to mrkdwn before posting', async () => {
+test('integration converts completed markdown to mrkdwn before posting to Slack', async () => {
   const tempDir = createTempDir();
   const repository = new SessionRepository(join(tempDir, 'app.sqlite'));
   const worker = new StdioJsonRpcWorkerClient(process.execPath, [fixturePath()]);
@@ -289,7 +289,7 @@ test('integration: completed markdown is converted to mrkdwn before posting', as
   cleanupDir(tempDir);
 });
 
-test('integration: completed local image path is uploaded to slack thread', async () => {
+test('integration uploads a completed local image path to the Slack thread', async () => {
   const tempDir = createTempDir();
   const repository = new SessionRepository(join(tempDir, 'app.sqlite'));
   const worker = new StdioJsonRpcWorkerClient(process.execPath, [fixturePath()]);

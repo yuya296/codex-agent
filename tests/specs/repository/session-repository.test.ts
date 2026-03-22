@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { SessionRepository } from '../src/repository/session-repository.js';
-import { cleanupDir, createTempDir } from './helpers.js';
+import { SessionRepository } from '../../../src/repository/session-repository.js';
+import { cleanupDir, createTempDir } from '../../support/helpers.js';
 
-test('sessions: slack thread key must be unique', () => {
+test('session repository keeps one Slack root thread mapped to only one session', () => {
   const tempDir = createTempDir();
   const dbPath = join(tempDir, 'app.sqlite');
   const repository = new SessionRepository(dbPath);

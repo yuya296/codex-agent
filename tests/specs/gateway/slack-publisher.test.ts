@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createSlackPublisher } from '../src/gateway/bolt.js';
+import { createSlackPublisher } from '../../../src/gateway/bolt.js';
 
 function createAppDouble() {
   const calls = {
@@ -33,7 +33,7 @@ function createAppDouble() {
   };
 }
 
-test('createSlackPublisher: setThreadStatus falls back to chat.postMessage when status API is disabled', async () => {
+test('Slack publisher falls back to chat.postMessage when the thread status API is disabled', async () => {
   const { app, calls } = createAppDouble();
   const publisher = createSlackPublisher(() => app as any, {
     slackAgentChatStatusEnabled: false,

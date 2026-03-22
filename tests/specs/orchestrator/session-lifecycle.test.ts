@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { Orchestrator } from '../src/orchestrator/orchestrator.js';
-import { SessionRepository } from '../src/repository/session-repository.js';
-import { cleanupDir, createTempDir, MockNotifier, MockWorkerClient } from './helpers.js';
+import { Orchestrator } from '../../../src/orchestrator/orchestrator.js';
+import { SessionRepository } from '../../../src/repository/session-repository.js';
+import { cleanupDir, createTempDir, MockNotifier, MockWorkerClient } from '../../support/helpers.js';
 
 function createDeps() {
   const tempDir = createTempDir();
@@ -14,7 +14,7 @@ function createDeps() {
   return { tempDir, repository, worker, notifier, orchestrator };
 }
 
-test('running state: additional message should be handled as steer', async () => {
+test('session lifecycle treats messages sent during running sessions as steer input', async () => {
   const { tempDir, repository, worker, notifier, orchestrator } = createDeps();
 
   worker.sendUserMessageImpl = async ({ text }) => [{ type: 'progress', message: `working:${text}` }];
@@ -46,7 +46,7 @@ test('running state: additional message should be handled as steer', async () =>
   cleanupDir(tempDir);
 });
 
-test('waiting_approval state: additional message should reject current approval and send new user message', async () => {
+test('session lifecycle rejects the current approval and starts a new turn when a message arrives during waiting_approval', async () => {
   const { tempDir, repository, worker, notifier, orchestrator } = createDeps();
 
   worker.sendUserMessageImpl = async ({ text }) => {
@@ -101,7 +101,7 @@ test('waiting_approval state: additional message should reject current approval 
   cleanupDir(tempDir);
 });
 
-test('approval button: decision should be forwarded to worker', async () => {
+test('session lifecycle forwards approval decisions to the worker for the current session', async () => {
   const { tempDir, repository, worker, notifier, orchestrator } = createDeps();
 
   worker.sendUserMessageImpl = async () => [
@@ -138,7 +138,7 @@ test('approval button: decision should be forwarded to worker', async () => {
   cleanupDir(tempDir);
 });
 
-test('failed session should remain resumable via same slack thread', async () => {
+test('session lifecycle keeps failed sessions resumable from the same Slack thread', async () => {
   const { tempDir, repository, worker, orchestrator, notifier } = createDeps();
 
   let first = true;
@@ -176,7 +176,7 @@ test('failed session should remain resumable via same slack thread', async () =>
   cleanupDir(tempDir);
 });
 
-test('missing session on thread reply should start a new session', async () => {
+test('session lifecycle starts a new session when a reply arrives without a known session mapping', async () => {
   const { tempDir, repository, worker, notifier, orchestrator } = createDeps();
 
   worker.sendUserMessageImpl = async ({ text }) => [{ type: 'completed', message: `done:${text}` }];
@@ -204,7 +204,7 @@ test('missing session on thread reply should start a new session', async () => {
   cleanupDir(tempDir);
 });
 
-test('worker callback: streaming progress should be reflected before returned events are empty', async () => {
+test('session lifecycle updates notifier state from streaming worker callbacks even when the final event array is empty', async () => {
   const { tempDir, repository, worker, notifier, orchestrator } = createDeps();
 
   worker.sendUserMessageImpl = async ({ text }, options) => {

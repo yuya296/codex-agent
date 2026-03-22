@@ -1,9 +1,9 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import type { Session } from '../src/domain/types.js';
-import type { GatewayNotifier } from '../src/orchestrator/orchestrator.js';
-import type { WorkerClient, WorkerRunEvent, WorkerRunOptions } from '../src/worker/types.js';
+import type { Session } from '../../src/domain/types.js';
+import type { GatewayNotifier } from '../../src/orchestrator/orchestrator.js';
+import type { WorkerClient, WorkerRunEvent, WorkerRunOptions } from '../../src/worker/types.js';
 
 export function createTempDir(prefix = 'codex-agent-test-'): string {
   return mkdtempSync(join(tmpdir(), prefix));

@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { summarizeResults, type CheckResult } from '../src/cli/doctor-lib.js';
+import { summarizeResults, type CheckResult } from '../../../src/cli/doctor-lib.js';
 
-test('doctor-lib: summarizeResults counts statuses', () => {
+test('doctor summary aggregates status counts by severity when summarizing check results', () => {
   const input: CheckResult[] = [
     { id: 'a', label: 'A', status: 'ok', detail: '' },
     { id: 'b', label: 'B', status: 'ok', detail: '' },

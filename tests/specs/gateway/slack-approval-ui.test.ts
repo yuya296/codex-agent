@@ -4,9 +4,9 @@ import {
   buildResolvedApprovalBlocks,
   getActionMessageTs,
   readApprovalPrompt,
-} from '../src/gateway/bolt.js';
+} from '../../../src/gateway/bolt.js';
 
-test('buildResolvedApprovalBlocks: removes buttons and shows selection', () => {
+test('Slack approval UI replaces decision buttons with the chosen result after an approval is resolved', () => {
   const blocks = buildResolvedApprovalBlocks('approve this?', 'approve');
 
   assert.equal(blocks.length, 2);
@@ -15,7 +15,7 @@ test('buildResolvedApprovalBlocks: removes buttons and shows selection', () => {
   assert.match((blocks[1] as any).elements[0].text, /Approve/);
 });
 
-test('getActionMessageTs: prefers container message ts', () => {
+test('Slack approval UI targets the container message timestamp first when updating an action response', () => {
   assert.equal(
     getActionMessageTs({
       container: { message_ts: '100.1' },
@@ -25,6 +25,6 @@ test('getActionMessageTs: prefers container message ts', () => {
   );
 });
 
-test('readApprovalPrompt: falls back to payload prompt', () => {
+test('Slack approval UI falls back to the payload text when approval blocks are unavailable', () => {
   assert.equal(readApprovalPrompt({}, 'approve this?'), 'approve this?');
 });

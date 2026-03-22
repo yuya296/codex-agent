@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Gateway, type SlackPublisher } from '../src/gateway/gateway.js';
+import { Gateway, type SlackPublisher } from '../../../src/gateway/gateway.js';
 
-test('Gateway: admin command posts English response and skips orchestrator', async () => {
+test('gateway routing answers admin commands without starting or continuing a session', async () => {
   const calls: string[] = [];
   const posted: Array<{ root_thread_ts: string; text: string }> = [];
 

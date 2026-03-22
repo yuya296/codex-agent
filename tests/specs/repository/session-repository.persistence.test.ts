@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { SessionRepository } from '../src/repository/session-repository.js';
-import { cleanupDir, createTempDir } from './helpers.js';
+import { SessionRepository } from '../../../src/repository/session-repository.js';
+import { cleanupDir, createTempDir } from '../../support/helpers.js';
 
-test('sqlite persistence: session mapping should be recoverable after restart', () => {
+test('session repository persistence keeps a saved session mapping after process restart', () => {
   const tempDir = createTempDir();
   const dbPath = join(tempDir, 'app.sqlite');
 
