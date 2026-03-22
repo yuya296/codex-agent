@@ -167,4 +167,4 @@ DM では管理コマンドも使えます。Slack の slash command ではな�
 - `npm start`: 本番起動
 - `npm run dev`: watch 起動
 - `npm run check`: TypeScript 型チェック
-- `npm test`: テスト実行
+- `npm test`: `tsx --test` で `tests/specs/*/*.test.ts` と `tests/integration/*.test.ts` をまとめて実行

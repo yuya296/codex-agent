@@ -9,7 +9,7 @@
     "doctor": "node --no-warnings --import tsx src/cli/doctor.ts",
     "start": "node --no-warnings --import tsx src/main.ts",
     "dev": "node --no-warnings --watch --import tsx src/main.ts",
-    "test": "node --no-warnings --import tsx --test tests/**/*.test.ts"
+    "test": "tsx --test tests/specs/*/*.test.ts tests/integration/*.test.ts"
   },
   "dependencies": {
     "@slack/bolt": "^4.5.0"
