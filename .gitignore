@@ -3,6 +3,7 @@ dist
 .env
 .docker/
 .playwright/
+.playwright-cli/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal

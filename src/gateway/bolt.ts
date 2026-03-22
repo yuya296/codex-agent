@@ -19,6 +19,13 @@ interface SlackPublisherOptions {
   slackAgentChatStatusEnabled: boolean;
 }
 
+interface RawSlackEventEnvelope {
+  team_id?: string;
+  authorizations?: Array<{
+    team_id?: string;
+  }>;
+}
+
 interface RawSlackMessageEvent {
   team?: string;
   channel: string;
@@ -54,14 +61,24 @@ export function createBoltGatewayRuntime(
     socketMode: true,
   });
 
-  app.event('message', async ({ event }) => {
-    const messageEvent = await buildSlackMessageEvent(event as RawSlackMessageEvent, config.botToken);
-    logSlackEvent('message', event as RawSlackMessageEvent);
-    if (!messageEvent) {
-      return;
-    }
+  app.event('message', async ({ event, body, context }) => {
+    const rawEvent = event as RawSlackMessageEvent;
+    const envelope = body as RawSlackEventEnvelope;
 
-    await gateway.handleMessageEvent(messageEvent);
+    try {
+      const messageEvent = await buildSlackMessageEvent(rawEvent, config.botToken, {
+        team_id: resolveTeamId(rawEvent, envelope, context),
+      });
+      logSlackEvent('message', rawEvent);
+      if (!messageEvent) {
+        logDroppedSlackMessageEvent(rawEvent, 'missing required identity fields');
+        return;
+      }
+
+      await gateway.handleMessageEvent(messageEvent);
+    } catch (error) {
+      logSlackMessageHandlingError(rawEvent, error);
+    }
   });
 
   const actionHandler = async ({ ack, body, action }: any, decision: 'approve' | 'reject') => {
@@ -197,18 +214,27 @@ export function toSlackMessageEvent(event: RawSlackMessageEvent): SlackMessageEv
 export async function buildSlackMessageEvent(
   event: RawSlackMessageEvent,
   botToken: string,
+  fallback?: { team_id?: string },
 ): Promise<SlackMessageEvent | null> {
-  const baseEvent = toSlackMessageEvent(event);
+  const baseEvent = toSlackMessageEvent({
+    ...event,
+    team: event.team ?? fallback?.team_id,
+  });
   if (!baseEvent) {
     return null;
   }
 
-  const downloaded = await downloadSlackImageFiles(event.files, botToken);
-  return {
-    ...baseEvent,
-    text: appendDownloadedImagesToText(baseEvent.text, downloaded.files),
-    temporary_directory: downloaded.directory,
-  };
+  try {
+    const downloaded = await downloadSlackImageFiles(event.files, botToken);
+    return {
+      ...baseEvent,
+      text: appendDownloadedImagesToText(baseEvent.text, downloaded.files),
+      temporary_directory: downloaded.directory,
+    };
+  } catch (error) {
+    logSlackImageDownloadError('build', event, error);
+    return baseEvent;
+  }
 }
 
 export function buildResolvedApprovalBlocks(
@@ -289,29 +315,34 @@ async function downloadSlackImageFiles(
   const downloaded: Array<{ path: string; name?: string; mimetype?: string }> = [];
 
   for (const file of imageFiles) {
-    const sourceUrl = file.url_private_download ?? file.url_private;
-    if (!sourceUrl) {
-      continue;
-    }
+    try {
+      const sourceUrl = file.url_private_download ?? file.url_private;
+      if (!sourceUrl) {
+        continue;
+      }
 
-    const response = await fetch(sourceUrl, {
-      headers: {
-        Authorization: `Bearer ${botToken}`,
-      },
-    });
-    if (!response.ok) {
-      continue;
-    }
+      const response = await fetch(sourceUrl, {
+        headers: {
+          Authorization: `Bearer ${botToken}`,
+        },
+      });
+      if (!response.ok) {
+        logSlackImageDownloadError('fetch', undefined, new Error(`Slack returned ${response.status}`), file);
+        continue;
+      }
 
-    const fileName = sanitizeDownloadedFileName(file.name, file.mimetype);
-    const targetPath = join(directory, fileName);
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    await writeFile(targetPath, bytes);
-    downloaded.push({
-      path: targetPath,
-      name: file.name,
-      mimetype: file.mimetype,
-    });
+      const fileName = sanitizeDownloadedFileName(file.name, file.mimetype);
+      const targetPath = join(directory, fileName);
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      await writeFile(targetPath, bytes);
+      downloaded.push({
+        path: targetPath,
+        name: file.name,
+        mimetype: file.mimetype,
+      });
+    } catch (error) {
+      logSlackImageDownloadError('file', undefined, error, file);
+    }
   }
 
   if (downloaded.length === 0) {
@@ -384,4 +415,68 @@ function logSlackClient(type: string, details: Record<string, unknown>): void {
 
   // eslint-disable-next-line no-console
   console.log('[slack:client]', JSON.stringify({ type, ...details }));
+}
+
+function resolveTeamId(
+  event: RawSlackMessageEvent,
+  envelope?: RawSlackEventEnvelope,
+  context?: { teamId?: string },
+): string | undefined {
+  return event.team ?? envelope?.team_id ?? envelope?.authorizations?.[0]?.team_id ?? context?.teamId;
+}
+
+function logDroppedSlackMessageEvent(event: RawSlackMessageEvent, reason: string): void {
+  // eslint-disable-next-line no-console
+  console.error(
+    '[slack:event-dropped]',
+    JSON.stringify({
+      reason,
+      channel: event.channel ?? null,
+      user: event.user ?? null,
+      ts: event.ts ?? null,
+      subtype: event.subtype ?? null,
+      channel_type: event.channel_type ?? null,
+      has_text: Boolean(event.text),
+      files_count: event.files?.length ?? 0,
+    }),
+  );
+}
+
+function logSlackMessageHandlingError(event: RawSlackMessageEvent, error: unknown): void {
+  // eslint-disable-next-line no-console
+  console.error(
+    '[slack:message-handler-error]',
+    JSON.stringify({
+      error: String(error),
+      channel: event.channel ?? null,
+      user: event.user ?? null,
+      ts: event.ts ?? null,
+      subtype: event.subtype ?? null,
+      channel_type: event.channel_type ?? null,
+      has_text: Boolean(event.text),
+      files_count: event.files?.length ?? 0,
+    }),
+  );
+}
+
+function logSlackImageDownloadError(
+  stage: 'build' | 'fetch' | 'file',
+  event: RawSlackMessageEvent | undefined,
+  error: unknown,
+  file?: { id?: string; name?: string; mimetype?: string },
+): void {
+  // eslint-disable-next-line no-console
+  console.error(
+    '[slack:image-download-error]',
+    JSON.stringify({
+      stage,
+      error: String(error),
+      team: event?.team ?? null,
+      channel: event?.channel ?? null,
+      ts: event?.ts ?? null,
+      file_id: file?.id ?? null,
+      file_name: file?.name ?? null,
+      mimetype: file?.mimetype ?? null,
+    }),
+  );
 }
