@@ -10,7 +10,7 @@ import {
   toSlackLoadingMessage,
   toSlackMrkdwn,
   type SlackPublisher,
-} from '../src/gateway/gateway.js';
+} from '../../../src/gateway/gateway.js';
 
 function createSession() {
   return {
@@ -26,7 +26,7 @@ function createSession() {
   };
 }
 
-test('toSlackLoadingMessage: collapses whitespace and truncates to 50 chars', () => {
+test('gateway presentation turns loading text into a single Slack-friendly line before posting', () => {
   const loading = toSlackLoadingMessage(
     '`playwright-cli` という名前の実体があるかを、そのコマンド名で直接確認します。\n権限制約があります。',
   );
@@ -36,7 +36,7 @@ test('toSlackLoadingMessage: collapses whitespace and truncates to 50 chars', ()
   assert.match(loading, /…$/);
 });
 
-test('notifyProgress: status update failure falls back to thread message and does not throw', async () => {
+test('gateway presentation posts a fallback thread message when Slack status APIs fail during a status update', async () => {
   const posted: Array<{ text: string }> = [];
   const publisher: SlackPublisher = {
     postThreadMessage: async (input) => {
@@ -53,7 +53,7 @@ test('notifyProgress: status update failure falls back to thread message and doe
   assert.deepEqual(posted, [{ text: 'long progress message' }]);
 });
 
-test('toSlackMrkdwn: preserves line structure and converts list/inline markdown for Slack', () => {
+test('gateway presentation renders markdown into Slack mrkdwn while preserving list structure', () => {
   const converted = toSlackMrkdwn(
     [
       '# Heading',
@@ -79,7 +79,7 @@ test('toSlackMrkdwn: preserves line structure and converts list/inline markdown 
   assert.match(converted, /\* \*bold\* item/);
 });
 
-test('notifyCompleted: converts markdown before posting thread message', async () => {
+test('gateway presentation converts completed answers before posting them to the Slack thread', async () => {
   const posted: Array<{ text: string }> = [];
   const publisher: SlackPublisher = {
     postThreadMessage: async (input) => {
@@ -102,7 +102,7 @@ test('notifyCompleted: converts markdown before posting thread message', async (
   assert.match(posted[0]?.text ?? '', /\* \*bold\* item/);
 });
 
-test('extractLocalImageFiles: strips markdown image syntax and bare local paths', () => {
+test('gateway presentation extracts local image references from both markdown image tags and bare paths', () => {
   const path = join(tmpdir(), 'codex-agent-slack-image-test.png');
   writeFileSync(path, 'image');
 
@@ -120,7 +120,7 @@ test('extractLocalImageFiles: strips markdown image syntax and bare local paths'
   assert.equal(extracted.text.includes(path), false);
 });
 
-test('renderSlackCompletedMessage: posts text and image uploads separately', () => {
+test('gateway presentation splits completed messages into thread text and image uploads when local files are present', () => {
   const path = join(tmpdir(), 'codex-agent-slack-render-test.png');
   writeFileSync(path, 'image');
 
@@ -135,18 +135,18 @@ test('renderSlackCompletedMessage: posts text and image uploads separately', () 
   assert.match(rendered.text, /\* item/);
 });
 
-test('handleMessageEvent: file_share subtype is accepted and temporary directory is cleaned up', async () => {
+test('gateway routing accepts file_share events and always cleans up downloaded files after handling them', async () => {
   const tempPath = join(tmpdir(), `codex-agent-gateway-temp-${Date.now()}`);
   mkdirSync(tempPath, { recursive: true });
 
   const calls: string[] = [];
   const gateway = new Gateway(
     {
-      startSessionFromSlack: async () => {
+      startSession: async () => {
         calls.push('start');
         return createSession();
       },
-      continueSessionFromSlack: async () => {
+      continueSession: async () => {
         calls.push('continue');
         return createSession();
       },

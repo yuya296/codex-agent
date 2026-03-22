@@ -2,9 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { loadConfigFromEnv } from '../src/config/index.js';
+import { loadConfigFromEnv } from '../../../src/config/index.js';
 
-test('loadConfigFromEnv: reads config from env and expands home paths', () => {
+test('config loading uses explicit environment values and expands home paths when variables are provided', () => {
   const loaded = loadConfigFromEnv({
     SLACK_BOT_TOKEN: 'xoxb-test',
     SLACK_APP_TOKEN: 'xapp-test',
@@ -29,7 +29,7 @@ test('loadConfigFromEnv: reads config from env and expands home paths', () => {
   assert.equal(loaded.port, 3000);
 });
 
-test('loadConfigFromEnv: applies defaults for optional values', () => {
+test('config loading falls back to defaults when optional values are omitted', () => {
   const loaded = loadConfigFromEnv({
     SLACK_BOT_TOKEN: 'xoxb-test',
     SLACK_APP_TOKEN: 'xapp-test',
@@ -43,11 +43,11 @@ test('loadConfigFromEnv: applies defaults for optional values', () => {
   assert.equal(loaded.slackAgentChatStatusEnabled, false);
 });
 
-test('loadConfigFromEnv: throws helpful message when required env is missing', () => {
+test('config loading fails with a helpful message when required variables are missing', () => {
   assert.throws(() => loadConfigFromEnv({}), /SLACK_BOT_TOKEN is required/);
 });
 
-test('loadConfigFromEnv: rejects invalid boolean env values', () => {
+test('config loading rejects invalid boolean values when parsing environment variables', () => {
   assert.throws(
     () =>
       loadConfigFromEnv({

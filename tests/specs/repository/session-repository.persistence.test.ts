@@ -1,28 +1,28 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { SessionRepository } from '../src/repository/session-repository.js';
-import { cleanupDir, createTempDir } from './helpers.js';
+import { SessionRepository } from '../../../src/repository/session-repository.js';
+import { cleanupDir, createTempDir } from '../../support/helpers.js';
 
-test('sqlite persistence: session mapping should be recoverable after restart', () => {
+test('session repository persistence keeps a saved session mapping after process restart', () => {
   const tempDir = createTempDir();
   const dbPath = join(tempDir, 'app.sqlite');
 
   const first = new SessionRepository(dbPath);
   const created = first.createSession({
-    slack_team_id: 'T1',
-    slack_channel_id: 'D1',
-    slack_root_thread_ts: '900.1',
+    channel_team_id: 'T1',
+    channel_id: 'D1',
+    channel_thread_id: '900.1',
     codex_thread_id: 'thread-900',
     state: 'idle',
   });
   first.close();
 
   const second = new SessionRepository(dbPath);
-  const recovered = second.findBySlackThread({
-    slack_team_id: 'T1',
-    slack_channel_id: 'D1',
-    slack_root_thread_ts: '900.1',
+  const recovered = second.findByChannelThread({
+    channel_team_id: 'T1',
+    channel_id: 'D1',
+    channel_thread_id: '900.1',
   });
 
   assert.ok(recovered);

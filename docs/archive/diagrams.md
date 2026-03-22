@@ -1,5 +1,8 @@
 # Mermaid Diagrams
 
+> Historical document.
+> 現在の仕様の正本ではなく、過去時点の詳細図表を参照するためのアーカイブ。
+
 ## 1. Architecture Diagram
 
 ```mermaid

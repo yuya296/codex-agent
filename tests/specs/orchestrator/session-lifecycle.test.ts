@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { Orchestrator } from '../src/orchestrator/orchestrator.js';
-import { SessionRepository } from '../src/repository/session-repository.js';
-import { cleanupDir, createTempDir, MockNotifier, MockWorkerClient } from './helpers.js';
+import { Orchestrator } from '../../../src/orchestrator/orchestrator.js';
+import { SessionRepository } from '../../../src/repository/session-repository.js';
+import { cleanupDir, createTempDir, MockNotifier, MockWorkerClient } from '../../support/helpers.js';
 
 function createDeps() {
   const tempDir = createTempDir();
@@ -14,25 +14,25 @@ function createDeps() {
   return { tempDir, repository, worker, notifier, orchestrator };
 }
 
-test('running state: additional message should be handled as steer', async () => {
+test('session lifecycle treats messages sent during running sessions as steer input', async () => {
   const { tempDir, repository, worker, notifier, orchestrator } = createDeps();
 
   worker.sendUserMessageImpl = async ({ text }) => [{ type: 'progress', message: `working:${text}` }];
   worker.sendSteerMessageImpl = async ({ text }) => [{ type: 'progress', message: `steer:${text}` }];
 
-  const started = await orchestrator.startSessionFromSlack({
-    slack_team_id: 'T1',
-    slack_channel_id: 'D1',
-    slack_root_thread_ts: '111.1',
+  const started = await orchestrator.startSession({
+    channel_team_id: 'T1',
+    channel_id: 'D1',
+    channel_thread_id: '111.1',
     user_id: 'U1',
     text: 'first',
   });
   assert.equal(started.state, 'running');
 
-  const continued = await orchestrator.continueSessionFromSlack({
-    slack_team_id: 'T1',
-    slack_channel_id: 'D1',
-    slack_root_thread_ts: '111.1',
+  const continued = await orchestrator.continueSession({
+    channel_team_id: 'T1',
+    channel_id: 'D1',
+    channel_thread_id: '111.1',
     user_id: 'U1',
     text: 'second',
   });
@@ -46,7 +46,7 @@ test('running state: additional message should be handled as steer', async () =>
   cleanupDir(tempDir);
 });
 
-test('waiting_approval state: additional message should reject current approval and send new user message', async () => {
+test('session lifecycle rejects the current approval and starts a new turn when a message arrives during waiting_approval', async () => {
   const { tempDir, repository, worker, notifier, orchestrator } = createDeps();
 
   worker.sendUserMessageImpl = async ({ text }) => {
@@ -62,26 +62,26 @@ test('waiting_approval state: additional message should reject current approval 
     return [{ type: 'completed', message: `done:${text}` }];
   };
 
-  await orchestrator.startSessionFromSlack({
-    slack_team_id: 'T1',
-    slack_channel_id: 'D1',
-    slack_root_thread_ts: '111.2',
+  await orchestrator.startSession({
+    channel_team_id: 'T1',
+    channel_id: 'D1',
+    channel_thread_id: '111.2',
     user_id: 'U1',
     text: 'first',
   });
 
-  const sessionBefore = repository.findBySlackThread({
-    slack_team_id: 'T1',
-    slack_channel_id: 'D1',
-    slack_root_thread_ts: '111.2',
+  const sessionBefore = repository.findByChannelThread({
+    channel_team_id: 'T1',
+    channel_id: 'D1',
+    channel_thread_id: '111.2',
   });
   assert.equal(sessionBefore?.state, 'waiting_approval');
   assert.equal(sessionBefore?.pending_approval_id, 'approval-1');
 
-  const continued = await orchestrator.continueSessionFromSlack({
-    slack_team_id: 'T1',
-    slack_channel_id: 'D1',
-    slack_root_thread_ts: '111.2',
+  const continued = await orchestrator.continueSession({
+    channel_team_id: 'T1',
+    channel_id: 'D1',
+    channel_thread_id: '111.2',
     user_id: 'U1',
     text: 'new-plan',
   });
@@ -101,7 +101,7 @@ test('waiting_approval state: additional message should reject current approval 
   cleanupDir(tempDir);
 });
 
-test('approval button: decision should be forwarded to worker', async () => {
+test('session lifecycle forwards approval decisions to the worker for the current session', async () => {
   const { tempDir, repository, worker, notifier, orchestrator } = createDeps();
 
   worker.sendUserMessageImpl = async () => [
@@ -112,18 +112,18 @@ test('approval button: decision should be forwarded to worker', async () => {
     },
   ];
 
-  await orchestrator.startSessionFromSlack({
-    slack_team_id: 'T1',
-    slack_channel_id: 'D1',
-    slack_root_thread_ts: '111.3',
+  await orchestrator.startSession({
+    channel_team_id: 'T1',
+    channel_id: 'D1',
+    channel_thread_id: '111.3',
     user_id: 'U1',
     text: 'ask',
   });
 
   const resolved = await orchestrator.resolveApproval({
-    slack_team_id: 'T1',
-    slack_channel_id: 'D1',
-    slack_root_thread_ts: '111.3',
+    channel_team_id: 'T1',
+    channel_id: 'D1',
+    channel_thread_id: '111.3',
     approval_id: 'approval-2',
     decision: 'approve',
   });
@@ -138,7 +138,7 @@ test('approval button: decision should be forwarded to worker', async () => {
   cleanupDir(tempDir);
 });
 
-test('failed session should remain resumable via same slack thread', async () => {
+test('session lifecycle keeps failed sessions resumable from the same Slack thread', async () => {
   const { tempDir, repository, worker, orchestrator, notifier } = createDeps();
 
   let first = true;
@@ -150,20 +150,20 @@ test('failed session should remain resumable via same slack thread', async () =>
     return [{ type: 'completed', message: `recovered:${text}` }];
   };
 
-  const started = await orchestrator.startSessionFromSlack({
-    slack_team_id: 'T1',
-    slack_channel_id: 'D1',
-    slack_root_thread_ts: '111.4',
+  const started = await orchestrator.startSession({
+    channel_team_id: 'T1',
+    channel_id: 'D1',
+    channel_thread_id: '111.4',
     user_id: 'U1',
     text: 'first',
   });
   assert.equal(started.state, 'failed');
   assert.equal(notifier.failedMessages.length, 1);
 
-  const resumed = await orchestrator.continueSessionFromSlack({
-    slack_team_id: 'T1',
-    slack_channel_id: 'D1',
-    slack_root_thread_ts: '111.4',
+  const resumed = await orchestrator.continueSession({
+    channel_team_id: 'T1',
+    channel_id: 'D1',
+    channel_thread_id: '111.4',
     user_id: 'U1',
     text: 'retry',
   });
@@ -176,15 +176,15 @@ test('failed session should remain resumable via same slack thread', async () =>
   cleanupDir(tempDir);
 });
 
-test('missing session on thread reply should start a new session', async () => {
+test('session lifecycle starts a new session when a reply arrives without a known session mapping', async () => {
   const { tempDir, repository, worker, notifier, orchestrator } = createDeps();
 
   worker.sendUserMessageImpl = async ({ text }) => [{ type: 'completed', message: `done:${text}` }];
 
-  const started = await orchestrator.continueSessionFromSlack({
-    slack_team_id: 'T1',
-    slack_channel_id: 'D1',
-    slack_root_thread_ts: '111.5',
+  const started = await orchestrator.continueSession({
+    channel_team_id: 'T1',
+    channel_id: 'D1',
+    channel_thread_id: '111.5',
     user_id: 'U1',
     text: 'first',
   });
@@ -193,10 +193,10 @@ test('missing session on thread reply should start a new session', async () => {
   assert.deepEqual(worker.callLog, ['createThread', 'sendUserMessage']);
   assert.deepEqual(notifier.progressMessages, ['thinking...']);
 
-  const saved = repository.findBySlackThread({
-    slack_team_id: 'T1',
-    slack_channel_id: 'D1',
-    slack_root_thread_ts: '111.5',
+  const saved = repository.findByChannelThread({
+    channel_team_id: 'T1',
+    channel_id: 'D1',
+    channel_thread_id: '111.5',
   });
   assert.equal(saved?.session_id, started.session_id);
 
@@ -204,7 +204,7 @@ test('missing session on thread reply should start a new session', async () => {
   cleanupDir(tempDir);
 });
 
-test('worker callback: streaming progress should be reflected before returned events are empty', async () => {
+test('session lifecycle updates notifier state from streaming worker callbacks even when the final event array is empty', async () => {
   const { tempDir, repository, worker, notifier, orchestrator } = createDeps();
 
   worker.sendUserMessageImpl = async ({ text }, options) => {
@@ -213,10 +213,10 @@ test('worker callback: streaming progress should be reflected before returned ev
     return [];
   };
 
-  const started = await orchestrator.startSessionFromSlack({
-    slack_team_id: 'T1',
-    slack_channel_id: 'D1',
-    slack_root_thread_ts: '111.6',
+  const started = await orchestrator.startSession({
+    channel_team_id: 'T1',
+    channel_id: 'D1',
+    channel_thread_id: '111.6',
     user_id: 'U1',
     text: 'live',
   });

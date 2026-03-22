@@ -21,10 +21,10 @@ export class Orchestrator {
     private readonly notifier: GatewayNotifier,
   ) {}
 
-  public async startSessionFromSlack(input: StartSessionInput): Promise<Session> {
-    const existing = this.repository.findBySlackThread(input);
+  public async startSession(input: StartSessionInput): Promise<Session> {
+    const existing = this.repository.findByChannelThread(input);
     if (existing) {
-      throw new Error('session already exists for slack root thread');
+      throw new Error('session already exists for channel thread');
     }
 
     const { codex_thread_id } = await this.workerClient.createThread();
@@ -34,37 +34,17 @@ export class Orchestrator {
       state: 'running',
     });
 
-    try {
-      await this.notifier.notifyProgress(session, 'thinking...');
-      let sawLiveEvent = false;
-      const handleEvent = async (event: WorkerRunEvent) => {
-        sawLiveEvent = true;
-        session = await this.applyWorkerEvent(session, event);
-      };
-      const events = await this.workerClient.sendUserMessage({
-        codex_thread_id,
-        user_id: input.user_id,
-        text: input.text,
-      }, { onEvent: handleEvent });
-      if (!sawLiveEvent) {
-        session = await this.applyWorkerEvents(session, events);
-      }
-      return session;
-    } catch (error) {
-      session = this.repository.updateSessionState({
-        session_id: session.session_id,
-        state: 'failed',
-        pending_approval_id: null,
-      });
-      await this.notifier.notifyFailed(session, `worker execution failed: ${String(error)}`);
-      return session;
-    }
+    return this.runWorkerFlow(session, async (onEvent) => this.workerClient.sendUserMessage({
+      codex_thread_id,
+      user_id: input.user_id,
+      text: input.text,
+    }, { onEvent }));
   }
 
-  public async continueSessionFromSlack(input: ContinueSessionInput): Promise<Session> {
-    const session = this.repository.findBySlackThread(input);
+  public async continueSession(input: ContinueSessionInput): Promise<Session> {
+    const session = this.repository.findByChannelThread(input);
     if (!session) {
-      return this.startSessionFromSlack(input);
+      return this.startSession(input);
     }
 
     let current = this.repository.updateSessionState({
@@ -75,37 +55,23 @@ export class Orchestrator {
 
     try {
       if (session.state === 'running') {
-        await this.notifier.notifyProgress(current, 'thinking...');
-        let sawLiveEvent = false;
-        const handleEvent = async (event: WorkerRunEvent) => {
-          sawLiveEvent = true;
-          current = await this.applyWorkerEvent(current, event);
-        };
-        const steerEvents = await this.workerClient.sendSteerMessage({
+        return this.runWorkerFlow(current, async (onEvent) => this.workerClient.sendSteerMessage({
           codex_thread_id: session.codex_thread_id,
           user_id: input.user_id,
           text: input.text,
-        }, { onEvent: handleEvent });
-        if (!sawLiveEvent) {
-          current = await this.applyWorkerEvents(current, steerEvents);
-        }
-        return current;
+        }, { onEvent }));
       }
 
       if (session.state === 'waiting_approval' && session.pending_approval_id) {
-        let sawRejectLiveEvent = false;
-        const rejectHandleEvent = async (event: WorkerRunEvent) => {
-          sawRejectLiveEvent = true;
-          current = await this.applyWorkerEvent(current, event);
-        };
-        const rejectEvents = await this.workerClient.sendApprovalDecision({
-          codex_thread_id: session.codex_thread_id,
-          approval_id: session.pending_approval_id,
-          decision: 'reject',
-        }, { onEvent: rejectHandleEvent });
-        if (!sawRejectLiveEvent) {
-          current = await this.applyWorkerEvents(current, rejectEvents);
-        }
+        current = await this.runWorkerFlow(
+          current,
+          async (onEvent) => this.workerClient.sendApprovalDecision({
+            codex_thread_id: session.codex_thread_id,
+            approval_id: session.pending_approval_id!,
+            decision: 'reject',
+          }, { onEvent }),
+          { notifyProgress: false },
+        );
         current = this.repository.updateSessionState({
           session_id: current.session_id,
           state: 'running',
@@ -113,34 +79,18 @@ export class Orchestrator {
         });
       }
 
-      await this.notifier.notifyProgress(current, 'thinking...');
-      let sawLiveEvent = false;
-      const handleEvent = async (event: WorkerRunEvent) => {
-        sawLiveEvent = true;
-        current = await this.applyWorkerEvent(current, event);
-      };
-      const events = await this.workerClient.sendUserMessage({
+      return this.runWorkerFlow(current, async (onEvent) => this.workerClient.sendUserMessage({
         codex_thread_id: session.codex_thread_id,
         user_id: input.user_id,
         text: input.text,
-      }, { onEvent: handleEvent });
-      if (!sawLiveEvent) {
-        current = await this.applyWorkerEvents(current, events);
-      }
-      return current;
+      }, { onEvent }));
     } catch (error) {
-      const failed = this.repository.updateSessionState({
-        session_id: session.session_id,
-        state: 'failed',
-        pending_approval_id: null,
-      });
-      await this.notifier.notifyFailed(failed, `worker execution failed: ${String(error)}`);
-      return failed;
+      return this.failSession(session.session_id, error);
     }
   }
 
   public async resolveApproval(input: ResolveApprovalInput): Promise<Session> {
-    const session = this.repository.findBySlackThread(input);
+    const session = this.repository.findByChannelThread(input);
     if (!session) {
       throw new Error('session not found for approval');
     }
@@ -152,32 +102,48 @@ export class Orchestrator {
       pending_approval_id: null,
     });
 
+    return this.runWorkerFlow(running, async (onEvent) => this.workerClient.sendApprovalDecision({
+      codex_thread_id: session.codex_thread_id,
+      approval_id: approvalId,
+      decision: input.decision,
+    }, { onEvent }));
+  }
+
+  private async runWorkerFlow(
+    session: Session,
+    action: (onEvent: (event: WorkerRunEvent) => Promise<void>) => Promise<WorkerRunEvent[]>,
+    options?: { notifyProgress?: boolean },
+  ): Promise<Session> {
     try {
-      await this.notifier.notifyProgress(running, 'thinking...');
-      let current = running;
+      let current = session;
+      if (options?.notifyProgress !== false) {
+        await this.notifier.notifyProgress(current, 'thinking...');
+      }
+
       let sawLiveEvent = false;
-      const handleEvent = async (event: WorkerRunEvent) => {
+      const events = await action(async (event) => {
         sawLiveEvent = true;
         current = await this.applyWorkerEvent(current, event);
-      };
-      const events = await this.workerClient.sendApprovalDecision({
-        codex_thread_id: session.codex_thread_id,
-        approval_id: approvalId,
-        decision: input.decision,
-      }, { onEvent: handleEvent });
+      });
+
       if (!sawLiveEvent) {
         current = await this.applyWorkerEvents(current, events);
       }
+
       return current;
     } catch (error) {
-      const failed = this.repository.updateSessionState({
-        session_id: session.session_id,
-        state: 'failed',
-        pending_approval_id: null,
-      });
-      await this.notifier.notifyFailed(failed, `worker execution failed: ${String(error)}`);
-      return failed;
+      return this.failSession(session.session_id, error);
     }
+  }
+
+  private async failSession(sessionId: string, error: unknown): Promise<Session> {
+    const failed = this.repository.updateSessionState({
+      session_id: sessionId,
+      state: 'failed',
+      pending_approval_id: null,
+    });
+    await this.notifier.notifyFailed(failed, `worker execution failed: ${String(error)}`);
+    return failed;
   }
 
   private async applyWorkerEvents(session: Session, events: WorkerRunEvent[]): Promise<Session> {

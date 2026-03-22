@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { basename, extname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { App } from '@slack/bolt';
-import { Gateway, type SlackApprovalAction, type SlackMessageEvent } from './gateway.js';
+import { Gateway, type SlackApprovalAction, type SlackMessageEvent, type SlackPublisher } from './gateway.js';
 
 export interface BoltGatewayRuntime {
   app: App;
@@ -13,6 +13,10 @@ export interface BoltGatewayRuntime {
 interface BoltRuntimeConfig {
   botToken: string;
   appToken: string;
+}
+
+interface SlackPublisherOptions {
+  slackAgentChatStatusEnabled: boolean;
 }
 
 interface RawSlackMessageEvent {
@@ -102,6 +106,71 @@ export function createBoltGatewayRuntime(
     },
     stop: async () => {
       await app.stop();
+    },
+  };
+}
+
+export function createSlackPublisher(
+  getApp: () => App,
+  options: SlackPublisherOptions,
+): SlackPublisher {
+  return {
+    postThreadMessage: async ({ channel_id, root_thread_ts, text, blocks }) => {
+      logSlackClient('chat.postMessage', {
+        channel_id,
+        root_thread_ts,
+        text,
+      });
+      await getApp().client.chat.postMessage({
+        channel: channel_id,
+        thread_ts: root_thread_ts,
+        text,
+        blocks: blocks as any,
+      });
+    },
+    uploadThreadFiles: async ({ channel_id, root_thread_ts, files }) => {
+      for (const file of files) {
+        logSlackClient('filesUploadV2', {
+          channel_id,
+          root_thread_ts,
+          path: file.path,
+        });
+        await getApp().client.filesUploadV2({
+          channel_id,
+          thread_ts: root_thread_ts,
+          file: file.path,
+          filename: basename(file.path),
+          alt_text: file.alt_text,
+        });
+      }
+    },
+    setThreadStatus: async ({ channel_id, root_thread_ts, status, loading_messages }) => {
+      if (!options.slackAgentChatStatusEnabled) {
+        logSlackClient('chat.postMessage.status-fallback', {
+          channel_id,
+          root_thread_ts,
+          status,
+        });
+        await getApp().client.chat.postMessage({
+          channel: channel_id,
+          thread_ts: root_thread_ts,
+          text: status,
+        });
+        return;
+      }
+
+      logSlackClient('assistant.threads.setStatus', {
+        channel_id,
+        root_thread_ts,
+        status,
+        loading_messages,
+      });
+      await getApp().client.assistant.threads.setStatus({
+        channel_id,
+        thread_ts: root_thread_ts,
+        status,
+        loading_messages,
+      });
     },
   };
 }
@@ -306,4 +375,13 @@ function logSlackEvent(type: string, event: RawSlackMessageEvent): void {
       files_count: event.files?.length ?? 0,
     }),
   );
+}
+
+function logSlackClient(type: string, details: Record<string, unknown>): void {
+  if (!debugSlackEvents) {
+    return;
+  }
+
+  // eslint-disable-next-line no-console
+  console.log('[slack:client]', JSON.stringify({ type, ...details }));
 }

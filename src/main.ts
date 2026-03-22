@@ -1,11 +1,10 @@
-import { basename } from 'node:path';
 import {
   createAdminCommandHandler,
   getCodexVersion,
   getLatestCodexVersion,
   runAdminDoctor,
 } from './admin/commands.js';
-import { createBoltGatewayRuntime } from './gateway/bolt.js';
+import { createBoltGatewayRuntime, createSlackPublisher } from './gateway/bolt.js';
 import { Gateway } from './gateway/gateway.js';
 import { Orchestrator } from './orchestrator/orchestrator.js';
 import { SessionRepository } from './repository/session-repository.js';
@@ -13,7 +12,6 @@ import { loadConfigFromEnv } from './config/index.js';
 import { StdioJsonRpcWorkerClient } from './worker/stdio-jsonrpc-worker-client.js';
 import { RestartableWorkerClient } from './worker/restartable-worker-client.js';
 
-const debugSlackEvents = process.env.DEBUG_SLACK_EVENTS === 'true';
 const debugWorkerEvents = process.env.DEBUG_WORKER_EVENTS === 'true';
 const debugWorkerEventDeltas = process.env.DEBUG_WORKER_EVENT_DELTAS === 'true';
 
@@ -61,66 +59,14 @@ async function main(): Promise<void> {
     runDoctor: async () => runAdminDoctor(config.workerCwd ?? process.cwd()),
   });
 
-  const runtime = createBoltGatewayRuntime(
-    (gateway = new Gateway(orchestrator, {
-      postThreadMessage: async ({ channel_id, root_thread_ts, text, blocks }) => {
-        logSlackClient('chat.postMessage', {
-          channel_id,
-          root_thread_ts,
-          text,
-        });
-        await runtime.app.client.chat.postMessage({
-          channel: channel_id,
-          thread_ts: root_thread_ts,
-          text,
-          blocks: blocks as any,
-        });
-      },
-      uploadThreadFiles: async ({ channel_id, root_thread_ts, files }) => {
-        for (const file of files) {
-          logSlackClient('filesUploadV2', {
-            channel_id,
-            root_thread_ts,
-            path: file.path,
-          });
-          await runtime.app.client.filesUploadV2({
-            channel_id,
-            thread_ts: root_thread_ts,
-            file: file.path,
-            filename: basename(file.path),
-            alt_text: file.alt_text,
-          });
-        }
-      },
-      setThreadStatus: async ({ channel_id, root_thread_ts, status, loading_messages }) => {
-        if (!config.slackAgentChatStatusEnabled) {
-          logSlackClient('chat.postMessage.status-fallback', {
-            channel_id,
-            root_thread_ts,
-            status,
-          });
-          await runtime.app.client.chat.postMessage({
-            channel: channel_id,
-            thread_ts: root_thread_ts,
-            text: status,
-          });
-          return;
-        }
+  let runtime!: ReturnType<typeof createBoltGatewayRuntime>;
+  const publisher = createSlackPublisher(
+    () => runtime.app,
+    { slackAgentChatStatusEnabled: config.slackAgentChatStatusEnabled },
+  );
 
-        logSlackClient('assistant.threads.setStatus', {
-          channel_id,
-          root_thread_ts,
-          status,
-          loading_messages,
-        });
-        await runtime.app.client.assistant.threads.setStatus({
-          channel_id,
-          thread_ts: root_thread_ts,
-          status,
-          loading_messages,
-        });
-      },
-    }, adminCommands)),
+  runtime = createBoltGatewayRuntime(
+    (gateway = new Gateway(orchestrator, publisher, adminCommands)),
     {
       botToken: config.slackBotToken,
       appToken: config.slackAppToken,
@@ -143,12 +89,3 @@ async function main(): Promise<void> {
 }
 
 void main();
-
-function logSlackClient(type: string, details: Record<string, unknown>): void {
-  if (!debugSlackEvents) {
-    return;
-  }
-
-  // eslint-disable-next-line no-console
-  console.log('[slack:client]', JSON.stringify({ type, ...details }));
-}
