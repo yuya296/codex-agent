@@ -20,10 +20,13 @@ WORKDIR /app
 COPY package.json package-lock.json tsconfig.json ./
 RUN npm ci
 
+COPY AGENTS.md ./
+COPY .codex ./.codex
 COPY src ./src
 COPY docs ./docs
 COPY tests ./tests
 COPY README.md ./
+COPY docker/codex-home-defaults /opt/codex-home-defaults
 
 COPY docker/entrypoint.sh /usr/local/bin/codex-agent-entrypoint
 RUN chmod +x /usr/local/bin/codex-agent-entrypoint
