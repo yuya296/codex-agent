@@ -14,7 +14,7 @@ class InMemorySlackPublisher implements SlackPublisher {
     channel_id: string;
     root_thread_ts: string;
     text: string;
-    blocks?: unknown[];
+    card?: unknown;
   }> = [];
   public readonly statuses: Array<{
     channel_id: string;
@@ -32,7 +32,7 @@ class InMemorySlackPublisher implements SlackPublisher {
     channel_id: string;
     root_thread_ts: string;
     text: string;
-    blocks?: unknown[];
+    card?: unknown;
   }): Promise<void> {
     this.posted.push(input);
   }
@@ -100,11 +100,9 @@ test('integration routes a Slack message through gateway, orchestrator, and work
   });
 
   const approvalMsg = publisher.posted.at(-1);
-  assert.ok(approvalMsg?.blocks);
+  assert.ok(approvalMsg?.card);
 
-  const actionValue = (
-    (approvalMsg?.blocks?.[1] as any).elements[0].value as string
-  );
+  const actionValue = (approvalMsg?.card as any).children[1].children[0].value as string;
   const actionPayload = JSON.parse(actionValue) as {
     team_id: string;
     channel_id: string;

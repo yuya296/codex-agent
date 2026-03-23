@@ -4,7 +4,7 @@ import {
   getLatestCodexVersion,
   runAdminDoctor,
 } from './admin/commands.js';
-import { createBoltGatewayRuntime, createSlackPublisher } from './gateway/bolt.js';
+import { createChatGatewayRuntime, createSlackPublisher } from './gateway/chat-sdk.js';
 import { Gateway } from './gateway/gateway.js';
 import { Orchestrator } from './orchestrator/orchestrator.js';
 import { SessionRepository } from './repository/session-repository.js';
@@ -45,6 +45,7 @@ async function main(): Promise<void> {
     getStatusContext: async () => ({
       processUptimeSeconds: process.uptime(),
       codexHome: config.codexHome,
+      redisUrl: config.redisUrl,
       sqlitePath: config.sqlitePath,
       workerCommand: config.workerCommand,
       workerArgs: config.workerArgs,
@@ -59,17 +60,18 @@ async function main(): Promise<void> {
     runDoctor: async () => runAdminDoctor(config.workerCwd ?? process.cwd()),
   });
 
-  let runtime!: ReturnType<typeof createBoltGatewayRuntime>;
-  const publisher = createSlackPublisher(
-    () => runtime.app,
-    { slackAgentChatStatusEnabled: config.slackAgentChatStatusEnabled },
-  );
+  let runtime!: ReturnType<typeof createChatGatewayRuntime>;
+  const publisher = createSlackPublisher(() => runtime.slackAdapter, {
+    slackAgentChatStatusEnabled: config.slackAgentChatStatusEnabled,
+  });
 
-  runtime = createBoltGatewayRuntime(
+  runtime = createChatGatewayRuntime(
     (gateway = new Gateway(orchestrator, publisher, adminCommands)),
     {
       botToken: config.slackBotToken,
-      appToken: config.slackAppToken,
+      signingSecret: config.slackSigningSecret,
+      botUserName: config.slackBotUserName,
+      redisUrl: config.redisUrl,
     },
   );
 

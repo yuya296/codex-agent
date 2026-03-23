@@ -29,7 +29,8 @@ mkdir -p "$(dirname "${SQLITE_PATH:-/data/app.sqlite}")"
 mkdir -p /run/playwright
 
 require_env SLACK_BOT_TOKEN
-require_env SLACK_APP_TOKEN
+require_env SLACK_SIGNING_SECRET
+require_env REDIS_URL
 
 prune_dangling_skill_symlinks
 

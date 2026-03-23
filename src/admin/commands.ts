@@ -15,6 +15,7 @@ export interface ParsedAdminCommand {
 export interface AdminCommandContext {
   processUptimeSeconds: number;
   codexHome: string;
+  redisUrl: string;
   sqlitePath: string;
   workerCommand: string;
   workerArgs: string[];
@@ -133,6 +134,7 @@ function formatStatus(context: AdminCommandContext, codexVersion: string): strin
     `- Worker command: ${workerCommand || 'unknown'}`,
     `- Worker cwd: ${context.workerCwd ?? process.cwd()}`,
     `- CODEX_HOME: ${context.codexHome}`,
+    `- Redis: ${context.redisUrl}`,
     `- SQLite: ${context.sqlitePath}`,
     `- Agent chat status: ${context.slackAgentChatStatusEnabled ? 'enabled' : 'disabled'}`,
     `- Uptime: ${Math.floor(context.processUptimeSeconds)}s`,

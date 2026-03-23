@@ -10,9 +10,10 @@ Slack DM と Codex (`codex app-server`) をつなぐ最小構成のエージェ�
 - Node.js 24 系（`node:sqlite` を利用）
 - npm
 - Codex CLI（`codex app-server` が使えるバージョン）
-- Slack App のトークン
+- Slack App の認証情報
   - Bot Token: `xoxb-...`
-  - App Level Token: `xapp-...`（Socket Mode 用）
+  - Signing Secret
+- Redis
 
 ## セットアップ
 
@@ -26,11 +27,13 @@ npm install
 
 ```bash
 export SLACK_BOT_TOKEN='xoxb-...'
-export SLACK_APP_TOKEN='xapp-...'
+export SLACK_SIGNING_SECRET='...'
+export REDIS_URL='redis://localhost:6379'
 ```
 
 必要に応じて以下も設定します。
 
+- `SLACK_BOT_USERNAME`
 - `CODEX_HOME`
 - `CODEX_WORKER_COMMAND`
 - `CODEX_WORKER_ARGS`
@@ -47,7 +50,9 @@ export SLACK_APP_TOKEN='xapp-...'
 
 - `CODEX_WORKER_COMMAND`: `codex`
 - `CODEX_WORKER_ARGS`: `app-server`
+- `SLACK_BOT_USERNAME`: `codex-agent`
 - `CODEX_HOME`: `$CODEX_HOME` があればそれ、なければ `~/.codex`
+- `REDIS_URL`: 必須
 - `WORKER_STREAM_EVENT_TIMEOUT_MS`: `300000`
 - `SLACK_AGENT_CHAT_STATUS_ENABLED`: `false`
 - `SQLITE_PATH`: `./data/app.sqlite`
@@ -64,9 +69,9 @@ export SLACK_APP_TOKEN='xapp-...'
 
 必要な権限の要点:
 
-- App-Level Token scope: `connections:write`
-- Bot Token Scopes: `chat:write`, `im:history`, `files:write`, `files:read`
-- Event Subscription: `message.im`
+- Bot Token Scopes: `chat:write`, `im:history`, `files:write`, `files:read`, `assistant:write`
+- Event Subscription: `app_mention`, `message.im`, `assistant_thread_started`, `assistant_thread_context_changed`
+- Interactivity: ON
 - `Agents & AI Apps`: ON
 - `Agent or Assistant`: OFF
 
@@ -127,7 +132,9 @@ npm run dev
 
 ```bash
 SLACK_BOT_TOKEN=xoxb-...
-SLACK_APP_TOKEN=xapp-...
+SLACK_SIGNING_SECRET=...
+SLACK_BOT_USERNAME=codex-agent
+REDIS_URL=redis://localhost:6379
 DEBUG_SLACK_EVENTS=false
 DEBUG_WORKER_EVENTS=false
 DEBUG_WORKER_EVENT_DELTAS=false
@@ -142,6 +149,8 @@ PORT=
 ```
 
 `SLACK_AGENT_CHAT_STATUS_ENABLED=true` にすると、進捗通知に `assistant.threads.setStatus` を使います。classic な DM スレッド返信を維持したい場合は、Slack App 側の `Agent or Assistant` は OFF にしてください。
+
+Webhook は `POST /api/webhooks/slack` で受けます。ローカルで Slack と疎通させる場合は、`PORT` で公開した HTTP endpoint を ngrok などで外部公開してください。
 
 通常回答の completed メッセージは、送信直前に Markdown を Slack 向けテキストへ整形します。箇条書きは `* `、番号付きリストは `1. ` の行構造を保つようにしています。ローカル画像パス（`/tmp/...png` など）が含まれる場合は、本文から取り除いたうえで thread にファイル添付します。Slack で受け取った画像添付は bot token の `files:read` で download し、一時ファイルのパスを worker に渡します。approval と status は今回の変換対象外です。
 

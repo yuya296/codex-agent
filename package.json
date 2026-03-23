@@ -12,7 +12,11 @@
     "test": "tsx --test tests/specs/*/*.test.ts tests/integration/*.test.ts"
   },
   "dependencies": {
-    "@slack/bolt": "^4.5.0"
+    "@chat-adapter/slack": "^4.20.2",
+    "@chat-adapter/state-redis": "^4.20.2",
+    "@hono/node-server": "^1.19.11",
+    "chat": "^4.20.2",
+    "hono": "^4.12.8"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

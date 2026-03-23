@@ -1,7 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { rm } from 'node:fs/promises';
-import { appendDownloadedImagesToText, buildSlackMessageEvent, toSlackMessageEvent } from '../../../src/gateway/bolt.js';
+import {
+  appendDownloadedImagesToText,
+  buildSlackMessageEvent,
+  toSlackMessageEvent,
+} from '../../../src/gateway/slack-message-event.js';
 
 test('Slack message event mapping turns threaded DM payloads into internal message events', () => {
   assert.deepEqual(

@@ -28,7 +28,8 @@ app 自体は image 内の `/app` で動作し、Codex worker の作業対象も
 | 変数 | 必須 | 既定値 | 用途 |
 |---|---|---|---|
 | `SLACK_BOT_TOKEN` | 必須 | なし | Slack Bot Token。メッセージ送信、DM 受信、ファイル操作に使う |
-| `SLACK_APP_TOKEN` | 必須 | なし | Slack App-Level Token。Socket Mode 接続に使う |
+| `SLACK_SIGNING_SECRET` | 必須 | なし | Slack webhook 署名検証に使う |
+| `SLACK_BOT_USERNAME` | 任意 | `codex-agent` | Chat SDK の mention 判定に使う bot 名 |
 | `SLACK_AGENT_CHAT_STATUS_ENABLED` | 任意 | `false` | `assistant.threads.setStatus` を使うときに `true` にする |
 | `DEBUG_SLACK_EVENTS` | 任意 | `false` | Slack event / client 呼び出しをログ出力する |
 | `DEBUG_WORKER_EVENTS` | 任意 | `false` | worker の主要イベントをログ出力する |
@@ -38,8 +39,9 @@ app 自体は image 内の `/app` で動作し、Codex worker の作業対象も
 | `CODEX_WORKER_ARGS` | 任意 | `app-server` | worker 起動時の引数 |
 | `CODEX_WORKER_CWD` | 任意 | `/app` | worker の作業ディレクトリ |
 | `WORKER_STREAM_EVENT_TIMEOUT_MS` | 任意 | `300000` | worker turn 内で無通信を許容する最大時間(ms) |
+| `REDIS_URL` | 必須 | `redis://redis:6379` | Chat SDK の thread subscription/state backend |
 | `SQLITE_PATH` | 任意 | `/data/app.sqlite` | SQLite ファイルの保存先 |
-| `PORT` | 任意 | なし | 必要な場合のみ app の待受ポートを明示する |
+| `PORT` | 任意 | `3000` | Hono webhook server の待受ポート |
 | `PLAYWRIGHT_AGENT_PROFILE_DIR` | 任意 | `/profiles/agent` | Playwright 用ブラウザ profile の保存先 |
 | `PLAYWRIGHT_MCP_CONFIG` | 任意 | `/run/playwright/cli.config.json` | Playwright MCP の設定ファイルパス |
 
@@ -50,6 +52,8 @@ docker compose up -d --build
 ```
 
 ソースコードを変えたら、app 本体へ反映するには再 build が必要です。
+
+Slack の Request URL は、外部から到達できる `http(s)://<host>:<port>/api/webhooks/slack` に向けてください。
 
 ログ確認:
 

@@ -1,0 +1,35 @@
+display_information:
+  name: codex-agent
+  description: Codex agent powered by Chat SDK webhook gateway
+
+features:
+  bot_user:
+    display_name: codex-agent
+    always_online: true
+
+oauth_config:
+  scopes:
+    bot:
+      - app_mentions:read
+      - assistant:write
+      - chat:write
+      - files:read
+      - files:write
+      - im:history
+      - im:read
+      - users:read
+
+settings:
+  event_subscriptions:
+    request_url: https://your-domain.example/api/webhooks/slack
+    bot_events:
+      - app_mention
+      - message.im
+      - assistant_thread_started
+      - assistant_thread_context_changed
+  interactivity:
+    is_enabled: true
+    request_url: https://your-domain.example/api/webhooks/slack
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

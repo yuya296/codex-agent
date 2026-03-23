@@ -1,32 +1,27 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createSlackPublisher } from '../../../src/gateway/bolt.js';
+import { createSlackPublisher } from '../../../src/gateway/chat-sdk.js';
 
-function createAppDouble() {
+function createAdapterDouble() {
   const calls = {
     postMessage: [] as Array<Record<string, unknown>>,
-    filesUploadV2: [] as Array<Record<string, unknown>>,
     setStatus: [] as Array<Record<string, unknown>>,
   };
 
   return {
-    app: {
-      client: {
-        chat: {
-          postMessage: async (input: Record<string, unknown>) => {
-            calls.postMessage.push(input);
-          },
-        },
-        filesUploadV2: async (input: Record<string, unknown>) => {
-          calls.filesUploadV2.push(input);
-        },
-        assistant: {
-          threads: {
-            setStatus: async (input: Record<string, unknown>) => {
-              calls.setStatus.push(input);
-            },
-          },
-        },
+    adapter: {
+      encodeThreadId: ({ channel, threadTs }: { channel: string; threadTs: string }) =>
+        `slack:${channel}:${threadTs}`,
+      postMessage: async (threadId: string, input: Record<string, unknown>) => {
+        calls.postMessage.push({ threadId, ...input });
+      },
+      setAssistantStatus: async (
+        channelId: string,
+        threadTs: string,
+        status: string,
+        loadingMessages?: string[],
+      ) => {
+        calls.setStatus.push({ channelId, threadTs, status, loadingMessages });
       },
     },
     calls,
@@ -34,8 +29,8 @@ function createAppDouble() {
 }
 
 test('Slack publisher falls back to chat.postMessage when the thread status API is disabled', async () => {
-  const { app, calls } = createAppDouble();
-  const publisher = createSlackPublisher(() => app as any, {
+  const { adapter, calls } = createAdapterDouble();
+  const publisher = createSlackPublisher(() => adapter as any, {
     slackAgentChatStatusEnabled: false,
   });
 
@@ -49,8 +44,7 @@ test('Slack publisher falls back to chat.postMessage when the thread status API 
   assert.equal(calls.postMessage.length, 1);
   assert.equal(calls.setStatus.length, 0);
   assert.deepEqual(calls.postMessage[0], {
-    channel: 'D1',
-    thread_ts: '100.1',
-    text: 'thinking...',
+    threadId: 'slack:D1:100.1',
+    raw: 'thinking...',
   });
 });

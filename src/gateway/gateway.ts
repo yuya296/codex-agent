@@ -8,6 +8,7 @@ import type {
 } from '../domain/types.js';
 import type { Orchestrator, GatewayNotifier } from '../orchestrator/orchestrator.js';
 import { parseAdminCommand, type AdminCommandHandler } from '../admin/commands.js';
+import { buildApprovalCard } from './gateway-cards.js';
 import {
   renderSlackCompletedMessage,
   toSlackLoadingMessage,
@@ -18,7 +19,7 @@ export interface SlackPublisher {
     channel_id: string;
     root_thread_ts: string;
     text: string;
-    blocks?: unknown[];
+    card?: unknown;
   }): Promise<void>;
   uploadThreadFiles(input: {
     channel_id: string;
@@ -170,34 +171,7 @@ export class Gateway implements GatewayNotifier {
       channel_id: session.slack_channel_id,
       root_thread_ts: session.slack_root_thread_ts,
       text: approval.prompt,
-      blocks: [
-        {
-          type: 'section',
-          text: {
-            type: 'mrkdwn',
-            text: approval.prompt,
-          },
-        },
-        {
-          type: 'actions',
-          elements: [
-            {
-              type: 'button',
-              action_id: 'approve',
-              text: { type: 'plain_text', text: 'Approve' },
-              style: 'primary',
-              value: actionValue,
-            },
-            {
-              type: 'button',
-              action_id: 'reject',
-              text: { type: 'plain_text', text: 'Reject' },
-              style: 'danger',
-              value: actionValue,
-            },
-          ],
-        },
-      ],
+      card: buildApprovalCard(approval.prompt, actionValue),
     });
   }
 

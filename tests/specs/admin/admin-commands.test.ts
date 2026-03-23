@@ -17,6 +17,7 @@ test('admin commands render help and status responses as operator-facing English
     getStatusContext: async () => ({
       processUptimeSeconds: 12.7,
       codexHome: '/root/.codex',
+      redisUrl: 'redis://redis:6379',
       sqlitePath: '/data/app.sqlite',
       workerCommand: 'codex',
       workerArgs: ['app-server'],
@@ -40,6 +41,7 @@ test('admin commands render help and status responses as operator-facing English
   assert.match(status, /^```\nStatus/m);
   assert.match(status, /Codex CLI: codex-cli 0.116.0/);
   assert.match(status, /Worker command: codex app-server/);
+  assert.match(status, /Redis: redis:\/\/redis:6379/);
   assert.match(status, /Agent chat status: enabled/);
   assert.match(status, /```$/);
 });

@@ -3,8 +3,10 @@ import { join } from 'node:path';
 
 export interface AppConfig {
   slackBotToken: string;
-  slackAppToken: string;
+  slackSigningSecret: string;
+  slackBotUserName: string;
   codexHome: string;
+  redisUrl: string;
   sqlitePath: string;
   slackAgentChatStatusEnabled: boolean;
   workerCommand: string;
@@ -16,8 +18,13 @@ export interface AppConfig {
 
 export function loadConfigFromEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const slackBotToken = readRequiredString(env.SLACK_BOT_TOKEN, 'SLACK_BOT_TOKEN');
-  const slackAppToken = readRequiredString(env.SLACK_APP_TOKEN, 'SLACK_APP_TOKEN');
+  const slackSigningSecret = readRequiredString(
+    env.SLACK_SIGNING_SECRET,
+    'SLACK_SIGNING_SECRET',
+  );
+  const slackBotUserName = env.SLACK_BOT_USERNAME?.trim() || 'codex-agent';
   const codexHome = expandHome(env.CODEX_HOME?.trim() || join(homedir(), '.codex'));
+  const redisUrl = readRequiredString(env.REDIS_URL, 'REDIS_URL');
   const workerCommand = env.CODEX_WORKER_COMMAND?.trim() || 'codex';
   const workerArgs = parseWorkerArgs(env.CODEX_WORKER_ARGS ?? 'app-server');
   const workerCwd = readOptionalString(env.CODEX_WORKER_CWD, 'CODEX_WORKER_CWD');
@@ -36,8 +43,10 @@ export function loadConfigFromEnv(env: NodeJS.ProcessEnv = process.env): AppConf
 
   return {
     slackBotToken,
-    slackAppToken,
+    slackSigningSecret,
+    slackBotUserName,
     codexHome,
+    redisUrl,
     sqlitePath,
     slackAgentChatStatusEnabled,
     workerCommand,

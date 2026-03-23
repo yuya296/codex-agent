@@ -7,7 +7,9 @@ import { loadConfigFromEnv } from '../../../src/config/index.js';
 test('config loading uses explicit environment values and expands home paths when variables are provided', () => {
   const loaded = loadConfigFromEnv({
     SLACK_BOT_TOKEN: 'xoxb-test',
-    SLACK_APP_TOKEN: 'xapp-test',
+    SLACK_SIGNING_SECRET: 'signing-secret',
+    REDIS_URL: 'redis://localhost:6379',
+    SLACK_BOT_USERNAME: 'codex-agent-dev',
     CODEX_HOME: '~/.codex',
     CODEX_WORKER_COMMAND: 'codex',
     CODEX_WORKER_ARGS: 'app-server --listen stdio://',
@@ -19,8 +21,10 @@ test('config loading uses explicit environment values and expands home paths whe
   });
 
   assert.equal(loaded.slackBotToken, 'xoxb-test');
-  assert.equal(loaded.slackAppToken, 'xapp-test');
+  assert.equal(loaded.slackSigningSecret, 'signing-secret');
+  assert.equal(loaded.slackBotUserName, 'codex-agent-dev');
   assert.equal(loaded.codexHome, join(homedir(), '.codex'));
+  assert.equal(loaded.redisUrl, 'redis://localhost:6379');
   assert.deepEqual(loaded.workerArgs, ['app-server', '--listen', 'stdio://']);
   assert.equal(loaded.workerCwd, join(homedir(), 'workspace'));
   assert.equal(loaded.workerStreamEventTimeoutMs, 600000);
@@ -32,12 +36,15 @@ test('config loading uses explicit environment values and expands home paths whe
 test('config loading falls back to defaults when optional values are omitted', () => {
   const loaded = loadConfigFromEnv({
     SLACK_BOT_TOKEN: 'xoxb-test',
-    SLACK_APP_TOKEN: 'xapp-test',
+    SLACK_SIGNING_SECRET: 'signing-secret',
+    REDIS_URL: 'redis://localhost:6379',
   });
 
   assert.equal(loaded.codexHome, join(homedir(), '.codex'));
+  assert.equal(loaded.slackBotUserName, 'codex-agent');
   assert.equal(loaded.workerCommand, 'codex');
   assert.deepEqual(loaded.workerArgs, ['app-server']);
+  assert.equal(loaded.redisUrl, 'redis://localhost:6379');
   assert.equal(loaded.sqlitePath, './data/app.sqlite');
   assert.equal(loaded.workerStreamEventTimeoutMs, 300000);
   assert.equal(loaded.slackAgentChatStatusEnabled, false);
@@ -52,7 +59,8 @@ test('config loading rejects invalid boolean values when parsing environment var
     () =>
       loadConfigFromEnv({
         SLACK_BOT_TOKEN: 'xoxb-test',
-        SLACK_APP_TOKEN: 'xapp-test',
+        SLACK_SIGNING_SECRET: 'signing-secret',
+        REDIS_URL: 'redis://localhost:6379',
         SLACK_AGENT_CHAT_STATUS_ENABLED: 'yes',
       }),
     /SLACK_AGENT_CHAT_STATUS_ENABLED must be boolean when provided/,

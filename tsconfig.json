@@ -1,6 +1,8 @@
 {
   "compilerOptions": {
     "target": "ES2022",
+    "jsx": "react-jsx",
+    "jsxImportSource": "chat",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "outDir": "dist",
