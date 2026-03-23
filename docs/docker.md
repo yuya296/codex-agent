@@ -18,8 +18,24 @@ app 自体は image 内の `/app` で動作し、Codex worker の作業対象も
 - Codex 認証: `./.docker/codex-home`
 - Playwright agent profile: `./.docker/playwright-agent-profile`
 - SQLite: `./.docker/data/app.sqlite`
+- project local rules/skills: `/app/AGENTS.md`, `/app/.codex/skills`
+- Docker 用 `CODEX_HOME` defaults: `docker/codex-home-defaults/`
 
 これらは bind mount です。host の通常 `.codex` や普段使いの Chrome profile は共有しません。
+
+## rules / skills の扱い
+
+Docker では rules / skills を次の 2 層で分けます。
+
+- `/app/AGENTS.md`, `/app/.codex/skills`
+  - repo に含まれる project local 定義
+- `docker/codex-home-defaults/`
+  - `~/.codex/AGENTS.md`, `~/.codex/skills` へ初回 seed する Docker 用デフォルト
+
+entrypoint は `docker/codex-home-defaults/` だけを `CODEX_HOME` に初回投入します。`~/AGENTS.md` は `~/.codex/AGENTS.md` への symlink として揃えます。`/app/.codex/skills` は自動複製しません。  
+既に `./.docker/codex-home` 側に存在するファイルは保持し、repo 更新で自動上書きはしません。
+
+デフォルトを再投入したい場合は、対象の `./.docker/codex-home` 側ファイルを削除してから container を再起動します。
 
 ## 環境変数
 

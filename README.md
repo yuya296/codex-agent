@@ -108,6 +108,13 @@ Docker では次を使います。
 - SQLite: `./.docker/data/app.sqlite`
 - app / worker の作業ディレクトリ: `/app`
 
+Docker 内の rules/skills は 2 層です。
+
+- project local: `/app/AGENTS.md`, `/app/.codex/skills`
+- Docker 用 `CODEX_HOME` defaults: `docker/codex-home-defaults/`
+
+container 起動時は `docker/codex-home-defaults/` だけを `~/.codex` に初回 seed します。global rules の実体は `~/.codex/AGENTS.md` で、`~/AGENTS.md` はその symlink として扱います。`/app/.codex/skills` をそのまま複製はしません。既存の `CODEX_HOME` 側ファイルは保持され、repo 更新で自動上書きはしません。
+
 詳細は [docs/docker.md](./docs/docker.md) を参照してください。
 
 開発時:
