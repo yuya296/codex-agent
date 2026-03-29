@@ -1,3 +1,8 @@
+---
+name: playwright-cli-docker
+description: Docker 内の `playwright-cli` 実行に限定した補助 skill。named session の利用、スクリーンショット再利用、container profile 前提の操作に絞る。
+---
+
 # playwright-cli-docker
 
 Docker 内の `playwright-cli` 実行に限定した補助 skill。
