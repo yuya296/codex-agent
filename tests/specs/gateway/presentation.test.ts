@@ -172,3 +172,82 @@ test('gateway routing accepts file_share events and always cleans up downloaded 
   assert.deepEqual(calls, ['start']);
   assert.equal(existsSync(tempPath), false);
 });
+
+test('gateway routing posts attachment warnings and skips worker execution when no actionable input remains', async () => {
+  const posted: Array<{ text: string }> = [];
+  const calls: string[] = [];
+  const gateway = new Gateway(
+    {
+      startSession: async () => {
+        calls.push('start');
+        return createSession();
+      },
+      continueSession: async () => {
+        calls.push('continue');
+        return createSession();
+      },
+    } as any,
+    {
+      postThreadMessage: async (input) => {
+        posted.push({ text: input.text });
+      },
+      uploadThreadFiles: async () => {},
+      setThreadStatus: async () => {},
+    },
+  );
+
+  await gateway.handleMessageEvent({
+    team_id: 'T1',
+    channel_id: 'D1',
+    user_id: 'U1',
+    text: '',
+    ts: '100.1',
+    channel_type: 'im',
+    attachment_warnings: ['- archive.zip: 未対応の MIME type です (application/zip)。'],
+    downloaded_files_count: 0,
+  });
+
+  assert.deepEqual(calls, []);
+  assert.equal(posted.length, 1);
+  assert.match(posted[0]?.text ?? '', /worker に渡していません/u);
+  assert.match(posted[0]?.text ?? '', /archive\.zip/u);
+});
+
+test('gateway routing posts attachment warnings and still continues when supported files were downloaded', async () => {
+  const posted: Array<{ text: string }> = [];
+  const calls: string[] = [];
+  const gateway = new Gateway(
+    {
+      startSession: async () => {
+        calls.push('start');
+        return createSession();
+      },
+      continueSession: async () => {
+        calls.push('continue');
+        return createSession();
+      },
+    } as any,
+    {
+      postThreadMessage: async (input) => {
+        posted.push({ text: input.text });
+      },
+      uploadThreadFiles: async () => {},
+      setThreadStatus: async () => {},
+    },
+  );
+
+  await gateway.handleMessageEvent({
+    team_id: 'T1',
+    channel_id: 'D1',
+    user_id: 'U1',
+    text: ['本文', '', '添付ファイル:', '- spec.pdf: /tmp/spec.pdf'].join('\n'),
+    ts: '100.1',
+    channel_type: 'im',
+    attachment_warnings: ['- archive.zip: 未対応の MIME type です (application/zip)。'],
+    downloaded_files_count: 1,
+  });
+
+  assert.deepEqual(calls, ['start']);
+  assert.equal(posted.length, 1);
+  assert.match(posted[0]?.text ?? '', /archive\.zip/u);
+});

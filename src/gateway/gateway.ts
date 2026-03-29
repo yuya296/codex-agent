@@ -49,6 +49,8 @@ export interface SlackMessageEvent {
   };
   channel_type: 'im' | 'channel' | 'group' | 'mpim';
   subtype?: string;
+  attachment_warnings?: string[];
+  downloaded_files_count?: number;
   temporary_directory?: string;
 }
 
@@ -77,6 +79,21 @@ export class Gateway implements GatewayNotifier {
       const rootThreadTs =
         event.assistant_thread?.thread_ts ??
         (event.parent_user_id && event.thread_ts ? event.thread_ts : event.ts);
+
+      if (event.attachment_warnings && event.attachment_warnings.length > 0) {
+        await this.publisher.postThreadMessage({
+          channel_id: event.channel_id,
+          root_thread_ts: rootThreadTs,
+          text: [
+            ':warning: 次の添付ファイルは worker に渡していません。',
+            ...event.attachment_warnings,
+          ].join('\n'),
+        });
+      }
+
+      if (!event.text.trim() && !event.downloaded_files_count && event.attachment_warnings?.length) {
+        return;
+      }
 
       const adminCommand = parseAdminCommand(event.text);
       if (adminCommand && this.adminCommands) {

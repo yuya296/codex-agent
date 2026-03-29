@@ -150,7 +150,7 @@ PORT=
 
 `SLACK_AGENT_CHAT_STATUS_ENABLED=true` にすると、進捗通知に `assistant.threads.setStatus` を使います。classic な DM スレッド返信を維持したい場合は、Slack App 側の `Agent or Assistant` は OFF にしてください。
 
-通常回答の completed メッセージは、送信直前に Markdown を Slack 向けテキストへ整形します。箇条書きは `* `、番号付きリストは `1. ` の行構造を保つようにしています。ローカル画像パス（`/tmp/...png` など）が含まれる場合は、本文から取り除いたうえで thread にファイル添付します。Slack で受け取った画像添付は bot token の `files:read` で download し、一時ファイルのパスを worker に渡します。approval と status は今回の変換対象外です。
+通常回答の completed メッセージは、送信直前に Markdown を Slack 向けテキストへ整形します。箇条書きは `* `、番号付きリストは `1. ` の行構造を保つようにしています。ローカル画像パス（`/tmp/...png` など）が含まれる場合は、本文から取り除いたうえで thread にファイル添付します。Slack で受け取った添付ファイルは bot token の `files:read` で download し、対応形式の画像・PDF・テキスト系ファイルは一時ファイルのパスを worker に渡します。未対応 MIME type やサイズ上限超過は thread に warning を返し、turn 後に一時ディレクトリを cleanup します。approval と status は今回の変換対象外です。
 
 DM では管理コマンドも使えます。Slack の slash command ではなく通常メッセージとして送ります。先頭の空白は任意です。
 
