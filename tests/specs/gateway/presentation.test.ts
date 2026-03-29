@@ -251,3 +251,51 @@ test('gateway routing posts attachment warnings and still continues when support
   assert.equal(posted.length, 1);
   assert.match(posted[0]?.text ?? '', /archive\.zip/u);
 });
+
+test('gateway routing keeps attachment files until approval is resolved', async () => {
+  const tempPath = join(tmpdir(), `codex-agent-gateway-approval-${Date.now()}`);
+  mkdirSync(tempPath, { recursive: true });
+
+  const gateway = new Gateway(
+    {
+      startSession: async () => ({
+        ...createSession(),
+        state: 'waiting_approval' as const,
+        pending_approval_id: 'approval-1',
+      }),
+      continueSession: async () => createSession(),
+      resolveApproval: async () => ({
+        ...createSession(),
+        state: 'idle' as const,
+        pending_approval_id: null,
+      }),
+    } as any,
+    {
+      postThreadMessage: async () => {},
+      uploadThreadFiles: async () => {},
+      setThreadStatus: async () => {},
+    },
+  );
+
+  await gateway.handleMessageEvent({
+    team_id: 'T1',
+    channel_id: 'D1',
+    user_id: 'U1',
+    text: '添付を確認して',
+    ts: '100.1',
+    channel_type: 'im',
+    temporary_directory: tempPath,
+  });
+
+  assert.equal(existsSync(tempPath), true);
+
+  await gateway.handleApprovalAction({
+    team_id: 'T1',
+    channel_id: 'D1',
+    root_thread_ts: '100.1',
+    approval_id: 'approval-1',
+    decision: 'approve',
+  });
+
+  assert.equal(existsSync(tempPath), false);
+});
