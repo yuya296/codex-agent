@@ -8,6 +8,7 @@ RUN apt-get update \
     chromium \
     gh \
     jq \
+    poppler-utils \
     ripgrep \
     sqlite3 \
     xvfb \

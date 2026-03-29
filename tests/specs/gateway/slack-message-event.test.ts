@@ -127,6 +127,20 @@ test('Slack message event mapping appends downloaded file paths as an attachment
   );
 });
 
+test('Slack message event mapping appends text attachment previews to the message', () => {
+  assert.equal(
+    appendDownloadedFilesToText('本文', [
+      {
+        path: '/tmp/notes.txt',
+        name: 'notes.txt',
+        mimetype: 'text/plain',
+        preview: '1行目\n2行目',
+      },
+    ]),
+    ['本文', '', '添付ファイル:', '- notes.txt: /tmp/notes.txt', '', '添付ファイル内容:', '- notes.txt', '1行目\n2行目'].join('\n'),
+  );
+});
+
 test('Slack message event mapping downloads PDF and text attachments to the temporary directory', async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async () => {
@@ -168,6 +182,43 @@ test('Slack message event mapping downloads PDF and text attachments to the temp
     assert.equal(event?.attachment_warnings, undefined);
     assert.equal(event?.downloaded_files_count, 2);
     assert.ok(event?.temporary_directory);
+    await rm(event?.temporary_directory ?? '', { recursive: true, force: true });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('Slack message event mapping includes text file previews when downloadable text is attached', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    return new Response('申請期限は4月1日です。', {
+      status: 200,
+      headers: {
+        'content-type': 'text/plain; charset=utf-8',
+      },
+    });
+  }) as typeof fetch;
+
+  try {
+    const event = await buildSlackMessageEvent({
+      team: 'T1',
+      channel: 'D1',
+      user: 'U1',
+      text: '確認して',
+      ts: '100.2',
+      channel_type: 'im',
+      files: [
+        {
+          id: 'F1',
+          name: 'notes.txt',
+          mimetype: 'text/plain',
+          url_private_download: 'https://files.example/notes.txt',
+        },
+      ],
+    }, 'xoxb-test');
+
+    assert.match(event?.text ?? '', /添付ファイル内容:/u);
+    assert.match(event?.text ?? '', /申請期限は4月1日です。/u);
     await rm(event?.temporary_directory ?? '', { recursive: true, force: true });
   } finally {
     globalThis.fetch = originalFetch;
