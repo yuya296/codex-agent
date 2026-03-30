@@ -19,7 +19,7 @@ Created remote state directories under:
 Next steps:
   1. Copy ${repo_root}/deploy/env/server.env.example to ${app_env_path}
   2. Set SLACK_BOT_TOKEN and SLACK_APP_TOKEN in ${app_env_path}
-  3. If APP_IMAGE stays codex-agent:local, run ${repo_root}/deploy/server/up.sh --build
-  4. If APP_IMAGE points to a registry image, run ${repo_root}/deploy/server/up.sh
+  3. If APP_IMAGE stays codex-agent:local, run ${repo_root}/deploy/server/build.sh
+  4. If APP_IMAGE points to a registry image, run ${repo_root}/deploy/server/pull.sh
   5. Run ${repo_root}/deploy/server/login-codex.sh for the initial Codex login
 EOF

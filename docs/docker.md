@@ -155,7 +155,7 @@ deploy/server/pull.sh
 deploy/server/up.sh
 ```
 
-`pull` は `APP_IMAGE` が registry image のときだけ使います。`codex-agent:local` を host build している場合は、`deploy/server/up.sh --build` を使います。
+`pull` は `APP_IMAGE` が registry image のときだけ使います。`codex-agent:local` を host build している場合は、`deploy/server/build.sh` を使います。
 
 Lightsail Instance を前提にした詳細手順は [deploy-remote.md](./deploy-remote.md) を参照してください。
 
