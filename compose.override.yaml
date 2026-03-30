@@ -1,0 +1,11 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./.docker/codex-home:/root/.codex
+      - ./.docker/playwright-agent-profile:/profiles/agent
+      - ./.docker/data:/data
+    stdin_open: true
+    tty: true

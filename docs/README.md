@@ -14,6 +14,7 @@
 4. 必要に応じて運用ガイド
    - [Slack API Setup](./slack-api-setup.md)
    - [Docker Guide](./docker.md)
+   - [Remote Deploy Guide](./deploy-remote.md)
 
 ## Document roles
 
@@ -27,6 +28,8 @@
   - Slack App の設定手順
 - `docker.md`
   - Docker での運用手順
+- `deploy-remote.md`
+  - remote Docker host への配置手順
 
 ## Historical documents
 

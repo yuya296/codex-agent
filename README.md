@@ -60,6 +60,7 @@ export SLACK_APP_TOKEN='xapp-...'
 - [Spec](./docs/spec.md)
 - [Slack API 設定ガイド](./docs/slack-api-setup.md)
 - [Docker 運用ガイド](./docs/docker.md)
+- [Remote Deploy Guide](./docs/deploy-remote.md)
 - [Archive](./docs/archive/)
 
 必要な権限の要点:
@@ -94,28 +95,55 @@ npm start
 
 Slack token などは外部環境変数から渡します。
 
-`.env.example` を `.env` にコピーして使えます。
+ローカル起動では `compose.yaml` と `compose.override.yaml` が自動で使われます。`.env.example` を `.env` にコピーして使えます。
 
 ```bash
 docker compose up -d --build
 docker compose exec app codex login --device-auth
 ```
 
-Docker では次を使います。
+ローカル Docker では次を使います。
 
 - Codex 認証: `./.docker/codex-home`
 - Playwright profile: `./.docker/playwright-agent-profile`
 - SQLite: `./.docker/data/app.sqlite`
 - app / worker の作業ディレクトリ: `/app`
 
-Docker 内の rules/skills は 2 層です。
+remote Docker host では `compose.server.yaml` を追加指定します。
+
+```bash
+deploy/server/build.sh
+deploy/server/up.sh
+```
+
+registry image を使う場合は `deploy/server/build.sh` の代わりに `deploy/server/pull.sh` を使います。
+
+補助スクリプトを使わない場合:
+
+```bash
+docker compose --env-file /etc/codex-agent/app.env \
+  -f compose.yaml \
+  -f compose.server.yaml \
+  up -d
+```
+
+remote では次を使います。
+
+- Compose env file: `/etc/codex-agent/app.env`
+- 永続データ root: `/srv/codex-agent`
+- Codex 認証: `/srv/codex-agent/codex-home`
+- Playwright profile: `/srv/codex-agent/playwright-agent-profile`
+- SQLite: `/srv/codex-agent/data/app.sqlite`
+- `APP_IMAGE=codex-agent:local` の場合は host build、pullable image を指定した場合は pull 運用
+
+Docker 内の rules/skills は local / remote 共通で 2 層です。
 
 - project local: `/app/AGENTS.md`, `/app/.codex/skills`
 - Docker 用 `CODEX_HOME` defaults: `docker/codex-home-defaults/`
 
 container 起動時は `docker/codex-home-defaults/` だけを `~/.codex` に初回 seed します。global rules の実体は `~/.codex/AGENTS.md` で、`~/AGENTS.md` はその symlink として扱います。`/app/.codex/skills` をそのまま複製はしません。既存の `CODEX_HOME` 側ファイルは保持され、repo 更新で自動上書きはしません。
 
-詳細は [docs/docker.md](./docs/docker.md) を参照してください。
+詳細は [docs/docker.md](./docs/docker.md) と [docs/deploy-remote.md](./docs/deploy-remote.md) を参照してください。
 
 開発時:
 
@@ -126,7 +154,8 @@ npm run dev
 補足:
 
 - アプリ本体は環境変数をそのまま読みます
-- Docker Compose は `.env` を読めますが、ローカル実行時に `.env` を自動ロードはしません
+- local では `.env` と `compose.override.yaml` が自動で読まれます
+- remote では `--env-file /etc/codex-agent/app.env -f compose.yaml -f compose.server.yaml` を明示します
 - 起動時に `CODEX_HOME` の値が worker プロセスにも渡されます
 - Docker は host repo を bind mount しないので、コード変更反映には再 build が必要です
 
@@ -135,6 +164,7 @@ npm run dev
 ```bash
 SLACK_BOT_TOKEN=xoxb-...
 SLACK_APP_TOKEN=xapp-...
+APP_IMAGE=codex-agent:local
 DEBUG_SLACK_EVENTS=false
 DEBUG_WORKER_EVENTS=false
 DEBUG_WORKER_EVENT_DELTAS=false
@@ -147,6 +177,8 @@ SQLITE_PATH=./data/app.sqlite
 SLACK_AGENT_CHAT_STATUS_ENABLED=false
 PORT=
 ```
+
+remote 用テンプレートは `deploy/env/server.env.example` を使います。`HOST_STATE_ROOT` は remote 専用 compose 変数で、既定値は `/srv/codex-agent` です。
 
 `SLACK_AGENT_CHAT_STATUS_ENABLED=true` にすると、進捗通知に `assistant.threads.setStatus` を使います。classic な DM スレッド返信を維持したい場合は、Slack App 側の `Agent or Assistant` は OFF にしてください。
 
