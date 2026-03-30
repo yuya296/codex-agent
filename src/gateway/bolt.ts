@@ -1,6 +1,8 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, extname, join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { promisify } from 'node:util';
 import { App } from '@slack/bolt';
 import { Gateway, type SlackApprovalAction, type SlackMessageEvent, type SlackPublisher } from './gateway.js';
 
@@ -43,13 +45,25 @@ interface RawSlackMessageEvent {
     id?: string;
     name?: string;
     mimetype?: string;
+    size?: number;
     url_private?: string;
     url_private_download?: string;
   }>;
 }
 
 const debugSlackEvents = process.env.DEBUG_SLACK_EVENTS === 'true';
+const execFileAsync = promisify(execFile);
 const DOWNLOADABLE_IMAGE_MIME_PREFIX = 'image/';
+const MAX_DOWNLOADABLE_SLACK_FILE_BYTES = 10 * 1024 * 1024;
+const MAX_ATTACHMENT_PREVIEW_CHARS = 6000;
+const MAX_TEXT_ATTACHMENT_BYTES = 64 * 1024;
+const DOWNLOADABLE_TEXT_MIME_TYPES = new Set([
+  'application/json',
+  'application/pdf',
+  'application/xml',
+  'application/x-yaml',
+  'text/xml',
+]);
 
 export function createBoltGatewayRuntime(
   gateway: Gateway,
@@ -224,15 +238,21 @@ export async function buildSlackMessageEvent(
     return null;
   }
 
+  if (!shouldDownloadSlackAttachments(baseEvent)) {
+    return baseEvent;
+  }
+
   try {
-    const downloaded = await downloadSlackImageFiles(event.files, botToken);
+    const downloaded = await downloadSlackFiles(event.files, botToken);
     return {
       ...baseEvent,
-      text: appendDownloadedImagesToText(baseEvent.text, downloaded.files),
+      text: appendDownloadedFilesToText(baseEvent.text, downloaded.files),
+      attachment_warnings: downloaded.warnings.length > 0 ? downloaded.warnings : undefined,
+      downloaded_files_count: downloaded.files.length,
       temporary_directory: downloaded.directory,
     };
   } catch (error) {
-    logSlackImageDownloadError('build', event, error);
+    logSlackFileDownloadError('build', event, error);
     return baseEvent;
   }
 }
@@ -278,9 +298,9 @@ export function readApprovalPrompt(body: any, fallback?: string): string {
   return 'Approval required to continue.';
 }
 
-export function appendDownloadedImagesToText(
+export function appendDownloadedFilesToText(
   text: string,
-  files: Array<{ path: string; name?: string; mimetype?: string }>,
+  files: Array<{ path: string; name?: string; mimetype?: string; preview?: string }>,
 ): string {
   if (files.length === 0) {
     return text;
@@ -291,80 +311,174 @@ export function appendDownloadedImagesToText(
     return `- ${label}${file.path}`;
   });
 
-  const attachmentSection = ['添付画像:', ...attachmentLines].join('\n');
-  return [text.trim(), attachmentSection].filter(Boolean).join('\n\n');
+  const attachmentSection = ['添付ファイル:', ...attachmentLines].join('\n');
+  const previewLines = files
+    .filter((file) => file.preview)
+    .flatMap((file) => {
+      const title = `- ${file.name ?? basename(file.path)}`;
+      return [title, file.preview ?? ''];
+    });
+  const previewSection =
+    previewLines.length > 0 ? ['添付ファイル内容:', ...previewLines].join('\n') : '';
+
+  return [text.trim(), attachmentSection, previewSection].filter(Boolean).join('\n\n');
 }
 
-async function downloadSlackImageFiles(
+export const appendDownloadedImagesToText = appendDownloadedFilesToText;
+
+async function downloadSlackFiles(
   files: RawSlackMessageEvent['files'],
   botToken: string,
 ): Promise<{
   directory?: string;
-  files: Array<{ path: string; name?: string; mimetype?: string }>;
+  files: Array<{ path: string; name?: string; mimetype?: string; preview?: string }>;
+  warnings: string[];
 }> {
   if (!Array.isArray(files) || files.length === 0) {
-    return { files: [] };
+    return { files: [], warnings: [] };
   }
 
-  const imageFiles = files.filter((file) => isDownloadableImageFile(file));
-  if (imageFiles.length === 0) {
-    return { files: [] };
-  }
+  let directory: string | undefined;
+  const downloaded: Array<{ path: string; name?: string; mimetype?: string; preview?: string }> = [];
+  const warnings: string[] = [];
 
-  const directory = await mkdtemp(join(tmpdir(), 'codex-agent-slack-files-'));
-  const downloaded: Array<{ path: string; name?: string; mimetype?: string }> = [];
+  for (const file of files) {
+    const rejectionReason = rejectSlackFileDownload(file);
+    if (rejectionReason) {
+      warnings.push(formatSlackAttachmentWarning(file, rejectionReason));
+      continue;
+    }
 
-  for (const file of imageFiles) {
     try {
       const sourceUrl = file.url_private_download ?? file.url_private;
       if (!sourceUrl) {
+        warnings.push(formatSlackAttachmentWarning(file, 'ダウンロード URL が見つかりません。'));
         continue;
       }
 
+      directory ??= await mkdtemp(join(tmpdir(), 'codex-agent-slack-files-'));
       const response = await fetch(sourceUrl, {
         headers: {
           Authorization: `Bearer ${botToken}`,
         },
       });
       if (!response.ok) {
-        logSlackImageDownloadError('fetch', undefined, new Error(`Slack returned ${response.status}`), file);
+        logSlackFileDownloadError('fetch', undefined, new Error(`Slack returned ${response.status}`), file);
+        warnings.push(
+          formatSlackAttachmentWarning(file, `ダウンロードに失敗しました (HTTP ${response.status})。`),
+        );
         continue;
       }
 
-      const fileName = sanitizeDownloadedFileName(file.name, file.mimetype);
+      const fileName = sanitizeDownloadedFileName(file.id, file.name, file.mimetype);
       const targetPath = join(directory, fileName);
       const bytes = new Uint8Array(await response.arrayBuffer());
       await writeFile(targetPath, bytes);
+      const preview = await extractSlackFilePreview(targetPath, file.mimetype);
       downloaded.push({
         path: targetPath,
         name: file.name,
         mimetype: file.mimetype,
+        preview,
       });
     } catch (error) {
-      logSlackImageDownloadError('file', undefined, error, file);
+      logSlackFileDownloadError('file', undefined, error, file);
+      warnings.push(formatSlackAttachmentWarning(file, `ダウンロードに失敗しました (${String(error)})。`));
     }
   }
 
-  if (downloaded.length === 0) {
+  if (downloaded.length === 0 && directory) {
     await rm(directory, { recursive: true, force: true });
-    return { files: [] };
+    directory = undefined;
   }
 
-  return { directory, files: downloaded };
+  return { directory, files: downloaded, warnings };
 }
 
-function isDownloadableImageFile(file: NonNullable<RawSlackMessageEvent['files']>[number]): boolean {
-  return typeof file.mimetype === 'string' && file.mimetype.startsWith(DOWNLOADABLE_IMAGE_MIME_PREFIX);
+function shouldDownloadSlackAttachments(event: SlackMessageEvent): boolean {
+  return event.channel_type === 'im' && (!event.subtype || event.subtype === 'file_share');
 }
 
-function sanitizeDownloadedFileName(name?: string, mimetype?: string): string {
+function rejectSlackFileDownload(file: NonNullable<RawSlackMessageEvent['files']>[number]): string | undefined {
+  if (typeof file.size === 'number' && file.size > MAX_DOWNLOADABLE_SLACK_FILE_BYTES) {
+    return `サイズ上限 ${formatBytes(MAX_DOWNLOADABLE_SLACK_FILE_BYTES)} を超えています (${formatBytes(file.size)})。`;
+  }
+
+  if (!isDownloadableSlackFile(file)) {
+    return `未対応の MIME type です (${file.mimetype ?? 'unknown'})。`;
+  }
+
+  return undefined;
+}
+
+function isDownloadableSlackFile(file: NonNullable<RawSlackMessageEvent['files']>[number]): boolean {
+  if (typeof file.mimetype !== 'string') {
+    return false;
+  }
+
+  return (
+    file.mimetype.startsWith(DOWNLOADABLE_IMAGE_MIME_PREFIX) ||
+    file.mimetype.startsWith('text/') ||
+    DOWNLOADABLE_TEXT_MIME_TYPES.has(file.mimetype)
+  );
+}
+
+function formatSlackAttachmentWarning(
+  file: NonNullable<RawSlackMessageEvent['files']>[number],
+  reason: string,
+): string {
+  const label = file.name ?? file.id ?? 'unknown';
+  return `- ${label}: ${reason}`;
+}
+
+async function extractSlackFilePreview(path: string, mimetype?: string): Promise<string | undefined> {
+  try {
+    if (mimetype === 'application/pdf') {
+      const { stdout } = await execFileAsync('pdftotext', ['-layout', path, '-'], {
+        maxBuffer: 1024 * 1024,
+      });
+      return normalizeAttachmentPreview(stdout);
+    }
+
+    if (
+      (typeof mimetype === 'string' && mimetype.startsWith('text/')) ||
+      (mimetype && DOWNLOADABLE_TEXT_MIME_TYPES.has(mimetype) && mimetype !== 'application/pdf')
+    ) {
+      const buffer = await readFile(path);
+      return normalizeAttachmentPreview(buffer.subarray(0, MAX_TEXT_ATTACHMENT_BYTES).toString('utf8'));
+    }
+  } catch (error) {
+    logSlackAttachmentPreviewError(path, mimetype, error);
+  }
+
+  return undefined;
+}
+
+function normalizeAttachmentPreview(value: string): string | undefined {
+  const trimmed = value.replace(/\u0000/g, '').trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  if (trimmed.length <= MAX_ATTACHMENT_PREVIEW_CHARS) {
+    return trimmed;
+  }
+
+  return `${trimmed.slice(0, MAX_ATTACHMENT_PREVIEW_CHARS)}\n...`;
+}
+
+function sanitizeDownloadedFileName(id?: string, name?: string, mimetype?: string): string {
   const baseName = (name && basename(name).replace(/[^a-zA-Z0-9._-]/g, '_')) || 'attachment';
+  const safeId = id ? id.replace(/[^a-zA-Z0-9._-]/g, '_') : undefined;
+  const suffix = safeId ? `-${safeId}` : '';
   if (extname(baseName)) {
-    return baseName;
+    const extension = extname(baseName);
+    const stem = baseName.slice(0, -extension.length) || 'attachment';
+    return `${stem}${suffix}${extension}`;
   }
 
   const fallbackExtension = mimeTypeToExtension(mimetype);
-  return `${baseName}${fallbackExtension}`;
+  return `${baseName}${suffix}${fallbackExtension}`;
 }
 
 function mimeTypeToExtension(mimetype?: string): string {
@@ -380,7 +494,42 @@ function mimeTypeToExtension(mimetype?: string): string {
   if (mimetype === 'image/webp') {
     return '.webp';
   }
+  if (mimetype === 'application/pdf') {
+    return '.pdf';
+  }
+  if (mimetype === 'application/json') {
+    return '.json';
+  }
+  if (mimetype === 'application/xml' || mimetype === 'text/xml') {
+    return '.xml';
+  }
+  if (mimetype === 'application/x-yaml') {
+    return '.yaml';
+  }
+  if (typeof mimetype === 'string' && mimetype.startsWith('text/')) {
+    return '.txt';
+  }
   return '';
+}
+
+function formatBytes(value: number): string {
+  if (value < 1024 * 1024) {
+    return `${Math.round(value / 102.4) / 10} KB`;
+  }
+
+  return `${Math.round((value / (1024 * 1024)) * 10) / 10} MB`;
+}
+
+function logSlackAttachmentPreviewError(path: string, mimetype: string | undefined, error: unknown): void {
+  // eslint-disable-next-line no-console
+  console.error(
+    '[slack:file-preview-error]',
+    JSON.stringify({
+      error: String(error),
+      path,
+      mimetype: mimetype ?? null,
+    }),
+  );
 }
 
 function logSlackEvent(type: string, event: RawSlackMessageEvent): void {
@@ -459,15 +608,15 @@ function logSlackMessageHandlingError(event: RawSlackMessageEvent, error: unknow
   );
 }
 
-function logSlackImageDownloadError(
+function logSlackFileDownloadError(
   stage: 'build' | 'fetch' | 'file',
   event: RawSlackMessageEvent | undefined,
   error: unknown,
-  file?: { id?: string; name?: string; mimetype?: string },
+  file?: { id?: string; name?: string; mimetype?: string; size?: number },
 ): void {
   // eslint-disable-next-line no-console
   console.error(
-    '[slack:image-download-error]',
+    '[slack:file-download-error]',
     JSON.stringify({
       stage,
       error: String(error),
@@ -477,6 +626,7 @@ function logSlackImageDownloadError(
       file_id: file?.id ?? null,
       file_name: file?.name ?? null,
       mimetype: file?.mimetype ?? null,
+      size: file?.size ?? null,
     }),
   );
 }

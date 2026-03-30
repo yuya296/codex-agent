@@ -172,3 +172,159 @@ test('gateway routing accepts file_share events and always cleans up downloaded 
   assert.deepEqual(calls, ['start']);
   assert.equal(existsSync(tempPath), false);
 });
+
+test('gateway routing cleans up temporary files even for ignored non-DM events', async () => {
+  const tempPath = join(tmpdir(), `codex-agent-gateway-ignored-${Date.now()}`);
+  mkdirSync(tempPath, { recursive: true });
+
+  const gateway = new Gateway(
+    {
+      startSession: async () => createSession(),
+      continueSession: async () => createSession(),
+    } as any,
+    {
+      postThreadMessage: async () => {},
+      uploadThreadFiles: async () => {},
+      setThreadStatus: async () => {},
+    },
+  );
+
+  await gateway.handleMessageEvent({
+    team_id: 'T1',
+    channel_id: 'C1',
+    user_id: 'U1',
+    text: 'ignored',
+    ts: '100.1',
+    channel_type: 'channel',
+    temporary_directory: tempPath,
+  });
+
+  assert.equal(existsSync(tempPath), false);
+});
+
+test('gateway routing posts attachment warnings and skips worker execution when no actionable input remains', async () => {
+  const posted: Array<{ text: string }> = [];
+  const calls: string[] = [];
+  const gateway = new Gateway(
+    {
+      startSession: async () => {
+        calls.push('start');
+        return createSession();
+      },
+      continueSession: async () => {
+        calls.push('continue');
+        return createSession();
+      },
+    } as any,
+    {
+      postThreadMessage: async (input) => {
+        posted.push({ text: input.text });
+      },
+      uploadThreadFiles: async () => {},
+      setThreadStatus: async () => {},
+    },
+  );
+
+  await gateway.handleMessageEvent({
+    team_id: 'T1',
+    channel_id: 'D1',
+    user_id: 'U1',
+    text: '',
+    ts: '100.1',
+    channel_type: 'im',
+    attachment_warnings: ['- archive.zip: 未対応の MIME type です (application/zip)。'],
+    downloaded_files_count: 0,
+  });
+
+  assert.deepEqual(calls, []);
+  assert.equal(posted.length, 1);
+  assert.match(posted[0]?.text ?? '', /worker に渡していません/u);
+  assert.match(posted[0]?.text ?? '', /archive\.zip/u);
+});
+
+test('gateway routing posts attachment warnings and still continues when supported files were downloaded', async () => {
+  const posted: Array<{ text: string }> = [];
+  const calls: string[] = [];
+  const gateway = new Gateway(
+    {
+      startSession: async () => {
+        calls.push('start');
+        return createSession();
+      },
+      continueSession: async () => {
+        calls.push('continue');
+        return createSession();
+      },
+    } as any,
+    {
+      postThreadMessage: async (input) => {
+        posted.push({ text: input.text });
+      },
+      uploadThreadFiles: async () => {},
+      setThreadStatus: async () => {},
+    },
+  );
+
+  await gateway.handleMessageEvent({
+    team_id: 'T1',
+    channel_id: 'D1',
+    user_id: 'U1',
+    text: ['本文', '', '添付ファイル:', '- spec.pdf: /tmp/spec.pdf'].join('\n'),
+    ts: '100.1',
+    channel_type: 'im',
+    attachment_warnings: ['- archive.zip: 未対応の MIME type です (application/zip)。'],
+    downloaded_files_count: 1,
+  });
+
+  assert.deepEqual(calls, ['start']);
+  assert.equal(posted.length, 1);
+  assert.match(posted[0]?.text ?? '', /archive\.zip/u);
+});
+
+test('gateway routing keeps attachment files until approval is resolved', async () => {
+  const tempPath = join(tmpdir(), `codex-agent-gateway-approval-${Date.now()}`);
+  mkdirSync(tempPath, { recursive: true });
+
+  const gateway = new Gateway(
+    {
+      startSession: async () => ({
+        ...createSession(),
+        state: 'waiting_approval' as const,
+        pending_approval_id: 'approval-1',
+      }),
+      continueSession: async () => createSession(),
+      resolveApproval: async () => ({
+        ...createSession(),
+        state: 'idle' as const,
+        pending_approval_id: null,
+      }),
+    } as any,
+    {
+      postThreadMessage: async () => {},
+      uploadThreadFiles: async () => {},
+      setThreadStatus: async () => {},
+    },
+  );
+
+  await gateway.handleMessageEvent({
+    team_id: 'T1',
+    channel_id: 'D1',
+    user_id: 'U1',
+    text: '添付を確認して',
+    ts: '100.1',
+    channel_type: 'im',
+    temporary_directory: tempPath,
+  });
+
+  assert.equal(existsSync(tempPath), true);
+
+  await gateway.handleApprovalAction({
+    team_id: 'T1',
+    channel_id: 'D1',
+    root_thread_ts: '100.1',
+    approval_id: 'approval-1',
+    decision: 'approve',
+  });
+
+  assert.equal(existsSync(tempPath), false);
+});

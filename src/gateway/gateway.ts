@@ -49,6 +49,8 @@ export interface SlackMessageEvent {
   };
   channel_type: 'im' | 'channel' | 'group' | 'mpim';
   subtype?: string;
+  attachment_warnings?: string[];
+  downloaded_files_count?: number;
   temporary_directory?: string;
 }
 
@@ -62,6 +64,8 @@ export interface SlackApprovalAction {
 }
 
 export class Gateway implements GatewayNotifier {
+  private readonly pendingAttachmentDirectories = new Map<string, string>();
+
   public constructor(
     private readonly orchestrator: Orchestrator,
     private readonly publisher: SlackPublisher,
@@ -69,14 +73,36 @@ export class Gateway implements GatewayNotifier {
   ) {}
 
   public async handleMessageEvent(event: SlackMessageEvent): Promise<void> {
+    let rootThreadTs = event.ts;
+    let pendingAttachmentKey: string | undefined;
+    let previousPendingDirectory: string | undefined;
+    let nextSessionState: Session['state'] | undefined;
+
     try {
       if (event.channel_type !== 'im' || (event.subtype && event.subtype !== 'file_share')) {
         return;
       }
 
-      const rootThreadTs =
+      rootThreadTs =
         event.assistant_thread?.thread_ts ??
         (event.parent_user_id && event.thread_ts ? event.thread_ts : event.ts);
+      pendingAttachmentKey = this.toPendingAttachmentKey(event.team_id, event.channel_id, rootThreadTs);
+      previousPendingDirectory = this.pendingAttachmentDirectories.get(pendingAttachmentKey);
+
+      if (event.attachment_warnings && event.attachment_warnings.length > 0) {
+        await this.publisher.postThreadMessage({
+          channel_id: event.channel_id,
+          root_thread_ts: rootThreadTs,
+          text: [
+            ':warning: 次の添付ファイルは worker に渡していません。',
+            ...event.attachment_warnings,
+          ].join('\n'),
+        });
+      }
+
+      if (!event.text.trim() && !event.downloaded_files_count && event.attachment_warnings?.length) {
+        return;
+      }
 
       const adminCommand = parseAdminCommand(event.text);
       if (adminCommand && this.adminCommands) {
@@ -97,7 +123,7 @@ export class Gateway implements GatewayNotifier {
           user_id: event.user_id,
           text: event.text,
         };
-        await this.orchestrator.startSession(input);
+        nextSessionState = (await this.orchestrator.startSession(input)).state;
         return;
       }
 
@@ -108,15 +134,27 @@ export class Gateway implements GatewayNotifier {
         user_id: event.user_id,
         text: event.text,
       };
-      await this.orchestrator.continueSession(input);
+      nextSessionState = (await this.orchestrator.continueSession(input)).state;
     } finally {
-      if (event.temporary_directory) {
+      if (pendingAttachmentKey) {
+        await this.reconcilePendingAttachmentDirectory(
+          pendingAttachmentKey,
+          previousPendingDirectory,
+          event.temporary_directory,
+          nextSessionState,
+        );
+      } else if (event.temporary_directory) {
         await rm(event.temporary_directory, { recursive: true, force: true });
       }
     }
   }
 
   public async handleApprovalAction(action: SlackApprovalAction): Promise<void> {
+    const pendingAttachmentKey = this.toPendingAttachmentKey(
+      action.team_id,
+      action.channel_id,
+      action.root_thread_ts,
+    );
     const input: ResolveApprovalInput = {
       channel_team_id: action.team_id,
       channel_id: action.channel_id,
@@ -125,7 +163,14 @@ export class Gateway implements GatewayNotifier {
       decision: action.decision,
     };
 
-    await this.orchestrator.resolveApproval(input);
+    const resolved = await this.orchestrator.resolveApproval(input);
+    if (resolved.state !== 'waiting_approval') {
+      const pendingDirectory = this.pendingAttachmentDirectories.get(pendingAttachmentKey);
+      this.pendingAttachmentDirectories.delete(pendingAttachmentKey);
+      if (pendingDirectory) {
+        await rm(pendingDirectory, { recursive: true, force: true });
+      }
+    }
   }
 
   public async notifyProgress(session: Session, message: string): Promise<void> {
@@ -227,6 +272,33 @@ export class Gateway implements GatewayNotifier {
       root_thread_ts: session.slack_root_thread_ts,
       text: `:warning: ${message}`,
     });
+  }
+
+  private toPendingAttachmentKey(teamId: string, channelId: string, rootThreadTs: string): string {
+    return `${teamId}:${channelId}:${rootThreadTs}`;
+  }
+
+  private async reconcilePendingAttachmentDirectory(
+    pendingAttachmentKey: string,
+    previousPendingDirectory: string | undefined,
+    currentTemporaryDirectory: string | undefined,
+    nextSessionState: Session['state'] | undefined,
+  ): Promise<void> {
+    if (nextSessionState === 'waiting_approval' && currentTemporaryDirectory) {
+      this.pendingAttachmentDirectories.set(pendingAttachmentKey, currentTemporaryDirectory);
+      if (previousPendingDirectory && previousPendingDirectory !== currentTemporaryDirectory) {
+        await rm(previousPendingDirectory, { recursive: true, force: true });
+      }
+      return;
+    }
+
+    this.pendingAttachmentDirectories.delete(pendingAttachmentKey);
+    const directories = new Set(
+      [previousPendingDirectory, currentTemporaryDirectory].filter((value): value is string => Boolean(value)),
+    );
+    for (const directory of directories) {
+      await rm(directory, { recursive: true, force: true });
+    }
   }
 }
 export {

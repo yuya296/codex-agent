@@ -33,7 +33,7 @@ Docker では rules / skills を次の 2 層で分けます。
   - `~/.codex/AGENTS.md`, `~/.codex/skills` へ初回 seed する Docker 用デフォルト
 
 entrypoint は `docker/codex-home-defaults/` だけを `CODEX_HOME` に初回投入します。`~/AGENTS.md` は `~/.codex/AGENTS.md` への symlink として揃えます。`/app/.codex/skills` は自動複製しません。  
-既に `./.docker/codex-home` 側に存在するファイルは保持し、repo 更新で自動上書きはしません。
+既に `./.docker/codex-home` 側に存在するファイルは保持し、repo 更新で自動上書きはしません。ただし default 側は正常で、seed 済みの `SKILL.md` が壊れている場合だけは起動時に自動修復します。
 
 デフォルトを再投入したい場合は、対象の `./.docker/codex-home` 側ファイルを削除してから container を再起動します。
 
