@@ -178,7 +178,7 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
 
     await this.respondToServerRequest(
       pendingApproval.requestId,
-      this.protocol.buildApprovalResponse(pendingApproval.method, input.decision),
+      this.protocol.buildApprovalResponse(pendingApproval.method, input.decision, pendingApproval.params),
     );
 
     return this.collectTurnEvents(pendingApproval.threadId, pendingApproval.turnId, options);
@@ -321,7 +321,9 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
     fallbackThreadId?: string,
     fallbackTurnId?: string,
   ): string | null {
-    if (!this.protocol.isApprovalRequestMethod(streamEvent.method)) {
+    const isApprovalRequest = this.protocol.isApprovalRequestMethod(streamEvent.method);
+    const isApprovalStyleElicitation = this.protocol.supportsApprovalStyleElicitation(streamEvent);
+    if (!isApprovalRequest && !isApprovalStyleElicitation) {
       return null;
     }
 
@@ -338,6 +340,7 @@ export class StdioJsonRpcWorkerClient implements WorkerClient {
       method: streamEvent.method,
       threadId: resolvedThreadId,
       turnId: resolvedTurnId,
+      params: streamEvent.params,
     });
 
     return approvalId;

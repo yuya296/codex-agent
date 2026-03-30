@@ -46,6 +46,64 @@ test('worker runtime fails immediately with method context when user-input reque
   await worker.close();
 });
 
+test('worker runtime surfaces approval-style elicitation requests and resumes after approval', async () => {
+  const worker = new StdioJsonRpcWorkerClient(process.execPath, [fixturePath()]);
+  const { codex_thread_id } = await worker.createThread();
+
+  const approvalEvents = await worker.sendUserMessage({
+    codex_thread_id,
+    text: '[ELICIT_APPROVAL]',
+    user_id: 'U1',
+  });
+
+  assert.deepEqual(approvalEvents, [
+    {
+      type: 'approval_required',
+      approval_id: 'elicitation-1',
+      prompt: 'Allow Linear MCP Server to run tool "linear mcp server_save_project"?',
+    },
+  ]);
+
+  const completedEvents = await worker.sendApprovalDecision({
+    codex_thread_id,
+    approval_id: 'elicitation-1',
+    decision: 'approve',
+  });
+
+  assert.deepEqual(completedEvents, [
+    {
+      type: 'progress',
+      message: 'approval:approve',
+    },
+    {
+      type: 'completed',
+      message: 'approval-complete:approve',
+    },
+  ]);
+
+  await worker.close();
+});
+
+test('worker runtime still fails fast for elicitation requests that need structured input', async () => {
+  const worker = new StdioJsonRpcWorkerClient(process.execPath, [fixturePath()]);
+  const { codex_thread_id } = await worker.createThread();
+
+  const events = await worker.sendUserMessage({
+    codex_thread_id,
+    text: '[ELICIT_COMPLEX]',
+    user_id: 'U1',
+  });
+
+  assert.deepEqual(events, [
+    {
+      type: 'failed',
+      error: 'worker requested unsupported client interaction: mcpServer/elicitation/request (Project name is required.)',
+    },
+  ]);
+
+  await worker.close();
+});
+
 test('worker runtime still surfaces approval requests when thread and turn ids are omitted', async () => {
   const worker = new StdioJsonRpcWorkerClient(process.execPath, [fixturePath()]);
   const { codex_thread_id } = await worker.createThread();

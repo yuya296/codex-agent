@@ -35,3 +35,29 @@ test('worker protocol adapter extracts completed final answers from item/complet
 
   assert.deepEqual(message, { text: 'final', phase: 'final_answer' });
 });
+
+test('worker protocol adapter converts approval-style elicitation decisions into MCP elicitation results', () => {
+  const adapter = createAdapter();
+
+  const result = adapter.buildApprovalResponse(
+    'mcpServer/elicitation/request',
+    'approve',
+    {
+      requestedSchema: {
+        type: 'object',
+        properties: {
+          allow: {
+            type: 'boolean',
+          },
+        },
+      },
+    },
+  );
+
+  assert.deepEqual(result, {
+    action: 'accept',
+    content: {
+      allow: true,
+    },
+  });
+});
