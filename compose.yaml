@@ -1,10 +1,9 @@
 services:
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ${APP_IMAGE:-codex-agent:local}
     init: true
     ipc: host
+    command: ["npm", "start"]
     environment:
       SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:?SLACK_BOT_TOKEN is required}
       SLACK_APP_TOKEN: ${SLACK_APP_TOKEN:?SLACK_APP_TOKEN is required}
@@ -21,9 +20,3 @@ services:
       PORT: ${PORT:-}
       PLAYWRIGHT_AGENT_PROFILE_DIR: ${PLAYWRIGHT_AGENT_PROFILE_DIR:-/profiles/agent}
       PLAYWRIGHT_MCP_CONFIG: ${PLAYWRIGHT_MCP_CONFIG:-/run/playwright/cli.config.json}
-    volumes:
-      - ./.docker/codex-home:/root/.codex
-      - ./.docker/playwright-agent-profile:/profiles/agent
-      - ./.docker/data:/data
-    stdin_open: true
-    tty: true
