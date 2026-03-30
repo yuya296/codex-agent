@@ -173,6 +173,35 @@ test('gateway routing accepts file_share events and always cleans up downloaded 
   assert.equal(existsSync(tempPath), false);
 });
 
+test('gateway routing cleans up temporary files even for ignored non-DM events', async () => {
+  const tempPath = join(tmpdir(), `codex-agent-gateway-ignored-${Date.now()}`);
+  mkdirSync(tempPath, { recursive: true });
+
+  const gateway = new Gateway(
+    {
+      startSession: async () => createSession(),
+      continueSession: async () => createSession(),
+    } as any,
+    {
+      postThreadMessage: async () => {},
+      uploadThreadFiles: async () => {},
+      setThreadStatus: async () => {},
+    },
+  );
+
+  await gateway.handleMessageEvent({
+    team_id: 'T1',
+    channel_id: 'C1',
+    user_id: 'U1',
+    text: 'ignored',
+    ts: '100.1',
+    channel_type: 'channel',
+    temporary_directory: tempPath,
+  });
+
+  assert.equal(existsSync(tempPath), false);
+});
+
 test('gateway routing posts attachment warnings and skips worker execution when no actionable input remains', async () => {
   const posted: Array<{ text: string }> = [];
   const calls: string[] = [];

@@ -100,9 +100,8 @@ repair_invalid_seeded_skills() {
       continue
     fi
 
-    rm -rf "${dest_path}"
-    cp -R "${src_path}" "${dest_path}"
-    echo "repaired invalid skill seed: ${dest_path}" >&2
+    cp "${src_skill}" "${dest_skill}"
+    echo "repaired invalid skill definition: ${dest_skill}" >&2
   done < <(find "${src_dir}" -mindepth 1 -maxdepth 1 -type d -print0)
 }
 

@@ -238,6 +238,10 @@ export async function buildSlackMessageEvent(
     return null;
   }
 
+  if (!shouldDownloadSlackAttachments(baseEvent)) {
+    return baseEvent;
+  }
+
   try {
     const downloaded = await downloadSlackFiles(event.files, botToken);
     return {
@@ -366,7 +370,7 @@ async function downloadSlackFiles(
         continue;
       }
 
-      const fileName = sanitizeDownloadedFileName(file.name, file.mimetype);
+      const fileName = sanitizeDownloadedFileName(file.id, file.name, file.mimetype);
       const targetPath = join(directory, fileName);
       const bytes = new Uint8Array(await response.arrayBuffer());
       await writeFile(targetPath, bytes);
@@ -389,6 +393,10 @@ async function downloadSlackFiles(
   }
 
   return { directory, files: downloaded, warnings };
+}
+
+function shouldDownloadSlackAttachments(event: SlackMessageEvent): boolean {
+  return event.channel_type === 'im' && (!event.subtype || event.subtype === 'file_share');
 }
 
 function rejectSlackFileDownload(file: NonNullable<RawSlackMessageEvent['files']>[number]): string | undefined {
@@ -459,14 +467,18 @@ function normalizeAttachmentPreview(value: string): string | undefined {
   return `${trimmed.slice(0, MAX_ATTACHMENT_PREVIEW_CHARS)}\n...`;
 }
 
-function sanitizeDownloadedFileName(name?: string, mimetype?: string): string {
+function sanitizeDownloadedFileName(id?: string, name?: string, mimetype?: string): string {
   const baseName = (name && basename(name).replace(/[^a-zA-Z0-9._-]/g, '_')) || 'attachment';
+  const safeId = id ? id.replace(/[^a-zA-Z0-9._-]/g, '_') : undefined;
+  const suffix = safeId ? `-${safeId}` : '';
   if (extname(baseName)) {
-    return baseName;
+    const extension = extname(baseName);
+    const stem = baseName.slice(0, -extension.length) || 'attachment';
+    return `${stem}${suffix}${extension}`;
   }
 
   const fallbackExtension = mimeTypeToExtension(mimetype);
-  return `${baseName}${fallbackExtension}`;
+  return `${baseName}${suffix}${fallbackExtension}`;
 }
 
 function mimeTypeToExtension(mimetype?: string): string {

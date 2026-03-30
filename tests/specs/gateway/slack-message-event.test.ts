@@ -188,6 +188,84 @@ test('Slack message event mapping downloads PDF and text attachments to the temp
   }
 });
 
+test('Slack message event mapping does not download attachments for non-DM events', async () => {
+  const originalFetch = globalThis.fetch;
+  let fetchCalls = 0;
+  globalThis.fetch = (async () => {
+    fetchCalls += 1;
+    return new Response('file-bytes', { status: 200 });
+  }) as typeof fetch;
+
+  try {
+    const event = await buildSlackMessageEvent({
+      team: 'T1',
+      channel: 'C1',
+      user: 'U1',
+      text: 'channel message',
+      ts: '100.2',
+      channel_type: 'channel',
+      files: [
+        {
+          id: 'F1',
+          name: 'spec.pdf',
+          mimetype: 'application/pdf',
+          url_private_download: 'https://files.example/spec.pdf',
+        },
+      ],
+    }, 'xoxb-test');
+
+    assert.equal(fetchCalls, 0);
+    assert.equal(event?.temporary_directory, undefined);
+    assert.equal(event?.downloaded_files_count, undefined);
+    assert.equal(event?.text, 'channel message');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('Slack message event mapping stores same-name attachments under unique paths', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    return new Response('same-name', {
+      status: 200,
+      headers: {
+        'content-type': 'text/plain; charset=utf-8',
+      },
+    });
+  }) as typeof fetch;
+
+  try {
+    const event = await buildSlackMessageEvent({
+      team: 'T1',
+      channel: 'D1',
+      user: 'U1',
+      text: '確認して',
+      ts: '100.2',
+      channel_type: 'im',
+      files: [
+        {
+          id: 'F1',
+          name: 'same.txt',
+          mimetype: 'text/plain',
+          url_private_download: 'https://files.example/1',
+        },
+        {
+          id: 'F2',
+          name: 'same.txt',
+          mimetype: 'text/plain',
+          url_private_download: 'https://files.example/2',
+        },
+      ],
+    }, 'xoxb-test');
+
+    assert.match(event?.text ?? '', /same-F1\.txt/u);
+    assert.match(event?.text ?? '', /same-F2\.txt/u);
+    await rm(event?.temporary_directory ?? '', { recursive: true, force: true });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('Slack message event mapping includes text file previews when downloadable text is attached', async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async () => {

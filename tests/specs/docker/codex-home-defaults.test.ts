@@ -34,6 +34,7 @@ test('docker entrypoint repairs an invalid seeded skill when the default skill h
       ['---', 'name: playwright-cli-docker', 'description: test skill', '---', '', '# valid'].join('\n'),
     );
     writeFileSync(join(installedSkillDir, 'SKILL.md'), '# broken skill');
+    writeFileSync(join(installedSkillDir, 'notes.txt'), 'keep me');
 
     await execFileAsync('bash', ['docker/entrypoint.sh', 'true'], {
       cwd: '/Users/yuya/dev/codex-agent',
@@ -53,6 +54,7 @@ test('docker entrypoint repairs an invalid seeded skill when the default skill h
     const repairedSkill = readFileSync(join(installedSkillDir, 'SKILL.md'), 'utf8');
     assert.match(repairedSkill, /^---$/m);
     assert.match(repairedSkill, /^name: playwright-cli-docker$/m);
+    assert.equal(readFileSync(join(installedSkillDir, 'notes.txt'), 'utf8'), 'keep me');
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }

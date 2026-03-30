@@ -143,6 +143,8 @@ export class Gateway implements GatewayNotifier {
           event.temporary_directory,
           nextSessionState,
         );
+      } else if (event.temporary_directory) {
+        await rm(event.temporary_directory, { recursive: true, force: true });
       }
     }
   }
