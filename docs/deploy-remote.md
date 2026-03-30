@@ -26,7 +26,7 @@
 - Playwright profile: `/srv/codex-agent/playwright-agent-profile`
 - SQLite: `/srv/codex-agent/data/app.sqlite`
 
-必要に応じて `HOST_STATE_ROOT` で state root を変えられる。
+必要に応じて `HOST_STATE_ROOT` で state root を変えられる。初回 bootstrap 前に変えたい場合は、`HOST_STATE_ROOT=/your/path deploy/server/bootstrap.sh` のように shell 側で渡す。
 
 ## 初期セットアップ
 
