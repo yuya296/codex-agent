@@ -153,19 +153,7 @@ export class WorkerProtocolAdapter {
       return false;
     }
 
-    const mode = this.asString(event.params.mode);
-    if (mode === 'url') {
-      return true;
-    }
-
-    const requestedSchema = this.asRecord(event.params.requestedSchema);
-    const properties = this.asRecord(requestedSchema.properties);
-    const entries = Object.entries(properties);
-    if (entries.length === 0) {
-      return true;
-    }
-
-    return entries.every(([, definition]) => this.asString(this.asRecord(definition).type) === 'boolean');
+    return this.readApprovalBooleanElicitationKey(event.params) !== null;
   }
 
   public resolveApprovalId(event: StreamEvent): string {
@@ -383,43 +371,52 @@ export class WorkerProtocolAdapter {
       return { action: 'decline' };
     }
 
-    const mode = this.asString(params.mode);
-    if (mode === 'url') {
-      return { action: 'accept' };
+    const approvalKey = this.readApprovalBooleanElicitationKey(params);
+    if (!approvalKey) {
+      throw new Error('unsupported elicitation approval response');
     }
 
-    const content = this.buildBooleanElicitationContent(params, true);
-    if (content) {
-      return {
-        action: 'accept',
-        content,
-      };
-    }
-
-    return { action: 'accept' };
+    return {
+      action: 'accept',
+      content: {
+        [approvalKey]: true,
+      },
+    };
   }
 
-  private buildBooleanElicitationContent(
-    params: Record<string, unknown>,
-    value: boolean,
-  ): Record<string, boolean> | null {
-    const requestedSchema = this.asRecord(params.requestedSchema);
-    const properties = this.asRecord(requestedSchema.properties);
-    const entries = Object.entries(properties);
-
-    if (entries.length === 0) {
+  private readApprovalBooleanElicitationKey(params: Record<string, unknown>): string | null {
+    if (this.asString(params.mode) === 'url') {
       return null;
     }
 
-    const content: Record<string, boolean> = {};
-    for (const [key, definition] of entries) {
-      if (this.asString(this.asRecord(definition).type) !== 'boolean') {
-        return null;
-      }
-      content[key] = value;
+    const requestedSchema = this.asRecord(params.requestedSchema);
+    const properties = this.asRecord(requestedSchema.properties);
+    const entries = Object.entries(properties);
+    if (entries.length !== 1) {
+      return null;
     }
 
-    return content;
+    const entry = entries[0];
+    if (!entry) {
+      return null;
+    }
+
+    const [key, definition] = entry;
+    const definitionRecord = this.asRecord(definition);
+    if (this.asString(definitionRecord.type) !== 'boolean') {
+      return null;
+    }
+
+    if ('default' in definitionRecord) {
+      return null;
+    }
+
+    const required = requestedSchema.required;
+    if (!Array.isArray(required) || required.length !== 1 || required[0] !== key) {
+      return null;
+    }
+
+    return key;
   }
 
   private readCommand(value: unknown): string | null {

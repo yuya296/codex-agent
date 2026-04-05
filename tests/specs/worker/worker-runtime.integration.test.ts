@@ -104,6 +104,46 @@ test('worker runtime still fails fast for elicitation requests that need structu
   await worker.close();
 });
 
+test('worker runtime keeps url-mode elicitation unsupported without a dedicated completion flow', async () => {
+  const worker = new StdioJsonRpcWorkerClient(process.execPath, [fixturePath()]);
+  const { codex_thread_id } = await worker.createThread();
+
+  const events = await worker.sendUserMessage({
+    codex_thread_id,
+    text: '[ELICIT_URL]',
+    user_id: 'U1',
+  });
+
+  assert.deepEqual(events, [
+    {
+      type: 'failed',
+      error: 'worker requested unsupported client interaction: mcpServer/elicitation/request (Open the browser flow to continue.)',
+    },
+  ]);
+
+  await worker.close();
+});
+
+test('worker runtime keeps multi-boolean elicitation unsupported to avoid collapsing choices', async () => {
+  const worker = new StdioJsonRpcWorkerClient(process.execPath, [fixturePath()]);
+  const { codex_thread_id } = await worker.createThread();
+
+  const events = await worker.sendUserMessage({
+    codex_thread_id,
+    text: '[ELICIT_MULTI_BOOLEAN]',
+    user_id: 'U1',
+  });
+
+  assert.deepEqual(events, [
+    {
+      type: 'failed',
+      error: 'worker requested unsupported client interaction: mcpServer/elicitation/request (Choose approval options.)',
+    },
+  ]);
+
+  await worker.close();
+});
+
 test('worker runtime still surfaces approval requests when thread and turn ids are omitted', async () => {
   const worker = new StdioJsonRpcWorkerClient(process.execPath, [fixturePath()]);
   const { codex_thread_id } = await worker.createThread();
