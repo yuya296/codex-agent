@@ -5,6 +5,7 @@ export interface PendingApproval {
   method: string;
   threadId: string;
   turnId: string;
+  params: Record<string, unknown>;
 }
 
 export class ApprovalRegistry {

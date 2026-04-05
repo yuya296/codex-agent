@@ -148,10 +148,32 @@ export class WorkerProtocolAdapter {
     );
   }
 
+  public supportsApprovalStyleElicitation(event: StreamEvent): boolean {
+    if (event.method !== METHODS.elicitationRequest) {
+      return false;
+    }
+
+    const mode = this.asString(event.params.mode);
+    if (mode === 'url') {
+      return true;
+    }
+
+    const requestedSchema = this.asRecord(event.params.requestedSchema);
+    const properties = this.asRecord(requestedSchema.properties);
+    const entries = Object.entries(properties);
+    if (entries.length === 0) {
+      return true;
+    }
+
+    return entries.every(([, definition]) => this.asString(this.asRecord(definition).type) === 'boolean');
+  }
+
   public resolveApprovalId(event: StreamEvent): string {
     return (
       this.asString(event.params.approvalId)
       ?? this.asString(event.params.approval_id)
+      ?? this.asString(event.params.elicitationId)
+      ?? this.asString(event.params.elicitation_id)
       ?? this.asString(event.params.itemId)
       ?? this.asString(event.params.item_id)
       ?? `request-${String(event.id ?? '')}`
@@ -159,6 +181,10 @@ export class WorkerProtocolAdapter {
   }
 
   public buildApprovalPrompt(event: StreamEvent): string {
+    if (event.method === METHODS.elicitationRequest) {
+      return this.buildElicitationPrompt(event.params);
+    }
+
     const reason = this.asString(event.params.reason);
     const command = this.readCommand(event.params.command);
 
@@ -177,7 +203,11 @@ export class WorkerProtocolAdapter {
     return 'Approval required to continue.';
   }
 
-  public buildApprovalResponse(method: string, decision: ApprovalDecision): Record<string, unknown> {
+  public buildApprovalResponse(
+    method: string,
+    decision: ApprovalDecision,
+    params: Record<string, unknown> = {},
+  ): Record<string, unknown> {
     const approve = decision === 'approve';
 
     if (method === METHODS.commandApprovalRequest || method === METHODS.fileChangeApprovalRequest) {
@@ -190,6 +220,10 @@ export class WorkerProtocolAdapter {
       return {
         decision: approve ? 'approved' : 'denied',
       };
+    }
+
+    if (method === METHODS.elicitationRequest) {
+      return this.buildElicitationResponse(decision, params);
     }
 
     throw new Error(`unsupported approval method: ${method}`);
@@ -327,6 +361,65 @@ export class WorkerProtocolAdapter {
 
   private formatCommandCodeBlock(command: string): string {
     return `\`\`\`\n${command}\n\`\`\``;
+  }
+
+  private buildElicitationPrompt(params: Record<string, unknown>): string {
+    const message = this.asString(params.message) ?? 'User confirmation is required to continue.';
+    const mode = this.asString(params.mode);
+    const url = this.asString(params.url);
+
+    if (mode === 'url' && url) {
+      return `${message}\n${url}`;
+    }
+
+    return message;
+  }
+
+  private buildElicitationResponse(
+    decision: ApprovalDecision,
+    params: Record<string, unknown>,
+  ): Record<string, unknown> {
+    if (decision === 'reject') {
+      return { action: 'decline' };
+    }
+
+    const mode = this.asString(params.mode);
+    if (mode === 'url') {
+      return { action: 'accept' };
+    }
+
+    const content = this.buildBooleanElicitationContent(params, true);
+    if (content) {
+      return {
+        action: 'accept',
+        content,
+      };
+    }
+
+    return { action: 'accept' };
+  }
+
+  private buildBooleanElicitationContent(
+    params: Record<string, unknown>,
+    value: boolean,
+  ): Record<string, boolean> | null {
+    const requestedSchema = this.asRecord(params.requestedSchema);
+    const properties = this.asRecord(requestedSchema.properties);
+    const entries = Object.entries(properties);
+
+    if (entries.length === 0) {
+      return null;
+    }
+
+    const content: Record<string, boolean> = {};
+    for (const [key, definition] of entries) {
+      if (this.asString(this.asRecord(definition).type) !== 'boolean') {
+        return null;
+      }
+      content[key] = value;
+    }
+
+    return content;
   }
 
   private readCommand(value: unknown): string | null {
