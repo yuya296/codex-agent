@@ -15,6 +15,12 @@ test('Slack approval UI replaces decision buttons with the chosen result after a
   assert.match((blocks[1] as any).elements[0].text, /Approve/);
 });
 
+test('Slack approval UI truncates oversized prompts so resolved blocks stay within Slack limits', () => {
+  const blocks = buildResolvedApprovalBlocks('x'.repeat(4000), 'approve');
+
+  assert.equal((((blocks[0] as any).text?.text) as string).length <= 3000, true);
+});
+
 test('Slack approval UI targets the container message timestamp first when updating an action response', () => {
   assert.equal(
     getActionMessageTs({
@@ -27,4 +33,15 @@ test('Slack approval UI targets the container message timestamp first when updat
 
 test('Slack approval UI falls back to the payload text when approval blocks are unavailable', () => {
   assert.equal(readApprovalPrompt({}, 'approve this?'), 'approve this?');
+});
+
+test('Slack approval UI falls back to the plain message text before legacy action payloads', () => {
+  assert.equal(
+    readApprovalPrompt({
+      message: {
+        text: 'full approval prompt',
+      },
+    }, 'truncated prompt'),
+    'full approval prompt',
+  );
 });

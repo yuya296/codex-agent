@@ -282,6 +282,42 @@ rl.on('line', (line) => {
         return;
       }
 
+      if (text.includes('[ELICIT_URL]')) {
+        request('mcpServer/elicitation/request', {
+          threadId,
+          turnId,
+          elicitationId: `elicitation-url-${turnCount}`,
+          mode: 'url',
+          message: 'Open the browser flow to continue.',
+          url: 'https://example.com/oauth',
+        });
+        return;
+      }
+
+      if (text.includes('[ELICIT_MULTI_BOOLEAN]')) {
+        request('mcpServer/elicitation/request', {
+          threadId,
+          turnId,
+          elicitationId: `elicitation-multi-${turnCount}`,
+          message: 'Choose approval options.',
+          requestedSchema: {
+            type: 'object',
+            properties: {
+              allow: {
+                type: 'boolean',
+                title: 'Allow',
+              },
+              remember: {
+                type: 'boolean',
+                title: 'Remember',
+              },
+            },
+            required: ['allow'],
+          },
+        });
+        return;
+      }
+
       if (text.includes('[STALL]')) {
         emitAgentMessage(threadId, turnId, `processing:${text}`, 'commentary');
         return;

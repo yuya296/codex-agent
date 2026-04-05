@@ -50,6 +50,7 @@ test('worker protocol adapter converts approval-style elicitation decisions into
             type: 'boolean',
           },
         },
+        required: ['allow'],
       },
     },
   );
@@ -60,4 +61,41 @@ test('worker protocol adapter converts approval-style elicitation decisions into
       allow: true,
     },
   });
+});
+
+test('worker protocol adapter does not treat url-mode elicitation as approval-style', () => {
+  const adapter = createAdapter();
+
+  const supported = adapter.supportsApprovalStyleElicitation({
+    kind: 'request',
+    method: 'mcpServer/elicitation/request',
+    params: {
+      mode: 'url',
+      message: 'Open browser',
+      url: 'https://example.com/oauth',
+    },
+  });
+
+  assert.equal(supported, false);
+});
+
+test('worker protocol adapter does not treat multi-boolean elicitation as approval-style', () => {
+  const adapter = createAdapter();
+
+  const supported = adapter.supportsApprovalStyleElicitation({
+    kind: 'request',
+    method: 'mcpServer/elicitation/request',
+    params: {
+      requestedSchema: {
+        type: 'object',
+        properties: {
+          allow: { type: 'boolean' },
+          remember: { type: 'boolean' },
+        },
+        required: ['allow'],
+      },
+    },
+  });
+
+  assert.equal(supported, false);
 });

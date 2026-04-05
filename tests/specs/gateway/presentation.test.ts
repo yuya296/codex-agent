@@ -328,3 +328,36 @@ test('gateway routing keeps attachment files until approval is resolved', async 
 
   assert.equal(existsSync(tempPath), false);
 });
+
+test('gateway approval presentation truncates oversized prompts for blocks and keeps action payload compact', async () => {
+  const posted: Array<{ text: string; blocks?: unknown[] }> = [];
+  const gateway = new Gateway(
+    {} as any,
+    {
+      postThreadMessage: async (input) => {
+        posted.push({ text: input.text, blocks: input.blocks });
+      },
+      uploadThreadFiles: async () => {},
+      setThreadStatus: async () => {},
+    },
+  );
+
+  const prompt = 'x'.repeat(4000);
+  await gateway.notifyApproval(createSession(), {
+    approval_id: 'approval-1',
+    prompt,
+  });
+
+  const message = posted[0];
+  assert.equal(message?.text, prompt);
+  assert.equal(((message?.blocks?.[0] as any)?.text?.text as string).length <= 3000, true);
+
+  const actionValue = ((message?.blocks?.[1] as any)?.elements?.[0]?.value as string) ?? '';
+  assert.equal(actionValue.length <= 2000, true);
+  assert.deepEqual(JSON.parse(actionValue), {
+    team_id: 'T1',
+    channel_id: 'D1',
+    root_thread_ts: '100.1',
+    approval_id: 'approval-1',
+  });
+});

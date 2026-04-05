@@ -4,7 +4,13 @@ import { basename, extname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { promisify } from 'node:util';
 import { App } from '@slack/bolt';
-import { Gateway, type SlackApprovalAction, type SlackMessageEvent, type SlackPublisher } from './gateway.js';
+import {
+  Gateway,
+  toSlackApprovalPrompt,
+  type SlackApprovalAction,
+  type SlackMessageEvent,
+  type SlackPublisher,
+} from './gateway.js';
 
 export interface BoltGatewayRuntime {
   app: App;
@@ -266,7 +272,7 @@ export function buildResolvedApprovalBlocks(
       type: 'section',
       text: {
         type: 'mrkdwn',
-        text: prompt,
+        text: toSlackApprovalPrompt(prompt),
       },
     },
     {
@@ -289,6 +295,11 @@ export function readApprovalPrompt(body: any, fallback?: string): string {
   const text = body?.message?.blocks?.[0]?.text?.text;
   if (typeof text === 'string' && text.trim() !== '') {
     return text;
+  }
+
+  const plainText = body?.message?.text;
+  if (typeof plainText === 'string' && plainText.trim() !== '') {
+    return plainText;
   }
 
   if (typeof fallback === 'string' && fallback.trim() !== '') {

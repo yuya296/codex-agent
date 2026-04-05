@@ -63,6 +63,8 @@ export interface SlackApprovalAction {
   decision: ApprovalDecision;
 }
 
+const SLACK_APPROVAL_PROMPT_BLOCK_LIMIT = 3000;
+
 export class Gateway implements GatewayNotifier {
   private readonly pendingAttachmentDirectories = new Map<string, string>();
 
@@ -208,8 +210,8 @@ export class Gateway implements GatewayNotifier {
       channel_id: session.slack_channel_id,
       root_thread_ts: session.slack_root_thread_ts,
       approval_id: approval.approval_id,
-      prompt: approval.prompt,
     });
+    const displayPrompt = toSlackApprovalPrompt(approval.prompt);
 
     await this.publisher.postThreadMessage({
       channel_id: session.slack_channel_id,
@@ -220,7 +222,7 @@ export class Gateway implements GatewayNotifier {
           type: 'section',
           text: {
             type: 'mrkdwn',
-            text: approval.prompt,
+            text: displayPrompt,
           },
         },
         {
@@ -301,6 +303,15 @@ export class Gateway implements GatewayNotifier {
     }
   }
 }
+
+export function toSlackApprovalPrompt(prompt: string): string {
+  if (prompt.length <= SLACK_APPROVAL_PROMPT_BLOCK_LIMIT) {
+    return prompt;
+  }
+
+  return `${prompt.slice(0, SLACK_APPROVAL_PROMPT_BLOCK_LIMIT - 1).trimEnd()}…`;
+}
+
 export {
   extractLocalImageFiles,
   renderSlackCompletedMessage,
