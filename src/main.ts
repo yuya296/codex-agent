@@ -1,3 +1,4 @@
+import { createRedisState } from '@chat-adapter/state-redis';
 import {
   createAdminCommandHandler,
   getCodexVersion,
@@ -8,6 +9,7 @@ import { createChatGatewayRuntime, createSlackPublisher } from './gateway/chat-s
 import { Gateway } from './gateway/gateway.js';
 import { Orchestrator } from './orchestrator/orchestrator.js';
 import { SessionRepository } from './repository/session-repository.js';
+import { migrateSessionsFromSqlite } from './repository/session-repository-migration.js';
 import { loadConfigFromEnv } from './config/index.js';
 import { StdioJsonRpcWorkerClient } from './worker/stdio-jsonrpc-worker-client.js';
 import { RestartableWorkerClient } from './worker/restartable-worker-client.js';
@@ -19,7 +21,23 @@ async function main(): Promise<void> {
   const config = loadConfigFromEnv();
   process.env.CODEX_HOME = config.codexHome;
 
-  const repository = new SessionRepository(config.sqlitePath);
+  const state = createRedisState({
+    keyPrefix: 'codex-agent',
+    url: config.redisUrl,
+  });
+  const repository = new SessionRepository(state);
+  let migratedSessions = 0;
+  if (config.sessionMigrationSqlitePath) {
+    await state.connect();
+    try {
+      migratedSessions = await migrateSessionsFromSqlite(
+        repository,
+        config.sessionMigrationSqlitePath,
+      );
+    } finally {
+      await state.disconnect();
+    }
+  }
   const workerClient = new RestartableWorkerClient(
     () => new StdioJsonRpcWorkerClient(
       config.workerCommand,
@@ -46,7 +64,6 @@ async function main(): Promise<void> {
       processUptimeSeconds: process.uptime(),
       codexHome: config.codexHome,
       redisUrl: config.redisUrl,
-      sqlitePath: config.sqlitePath,
       workerCommand: config.workerCommand,
       workerArgs: config.workerArgs,
       workerCwd: config.workerCwd,
@@ -71,13 +88,17 @@ async function main(): Promise<void> {
       botToken: config.slackBotToken,
       signingSecret: config.slackSigningSecret,
       botUserName: config.slackBotUserName,
-      redisUrl: config.redisUrl,
+      state,
     },
   );
 
   await runtime.start(config.port);
   // eslint-disable-next-line no-console
   console.log('codex-agent started');
+  if (migratedSessions > 0) {
+    // eslint-disable-next-line no-console
+    console.log(`migrated ${migratedSessions} sessions from sqlite`);
+  }
 
   const shutdown = async () => {
     await runtime.stop();

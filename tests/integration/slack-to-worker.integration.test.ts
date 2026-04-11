@@ -59,9 +59,17 @@ function fixturePath(): string {
   return fileURLToPath(new URL('../fixtures/mock-worker.mjs', import.meta.url));
 }
 
+function createSessionFixture() {
+  return {
+    slack_team_id: 'T1',
+    slack_channel_id: 'D1',
+    slack_root_thread_ts: '500.1',
+    codex_thread_id: 'thread-1',
+  } as any;
+}
+
 test('integration routes a Slack message through gateway, orchestrator, and worker before returning thread updates', async () => {
-  const tempDir = createTempDir();
-  const repository = new SessionRepository(join(tempDir, 'app.sqlite'));
+  const repository = new SessionRepository(':memory:');
   const worker = new StdioJsonRpcWorkerClient(process.execPath, [fixturePath()]);
   const publisher = new InMemorySlackPublisher();
 
@@ -120,12 +128,10 @@ test('integration routes a Slack message through gateway, orchestrator, and work
 
   await worker.close();
   repository.close();
-  cleanupDir(tempDir);
 });
 
 test('integration uses assistant_thread.thread_ts as the Slack root thread when that value is available', async () => {
-  const tempDir = createTempDir();
-  const repository = new SessionRepository(join(tempDir, 'app.sqlite'));
+  const repository = new SessionRepository(':memory:');
   const worker = new StdioJsonRpcWorkerClient(process.execPath, [fixturePath()]);
   const publisher = new InMemorySlackPublisher();
 
@@ -165,12 +171,10 @@ test('integration uses assistant_thread.thread_ts as the Slack root thread when 
 
   await worker.close();
   repository.close();
-  cleanupDir(tempDir);
 });
 
 test('integration starts a new session for an inherited assistant thread when no mapping exists yet', async () => {
-  const tempDir = createTempDir();
-  const repository = new SessionRepository(join(tempDir, 'app.sqlite'));
+  const repository = new SessionRepository(':memory:');
   const worker = new StdioJsonRpcWorkerClient(process.execPath, [fixturePath()]);
   const publisher = new InMemorySlackPublisher();
 
@@ -200,12 +204,10 @@ test('integration starts a new session for an inherited assistant thread when no
 
   await worker.close();
   repository.close();
-  cleanupDir(tempDir);
 });
 
 test('integration treats a DM with thread_ts but without parent_user_id as a new session', async () => {
-  const tempDir = createTempDir();
-  const repository = new SessionRepository(join(tempDir, 'app.sqlite'));
+  const repository = new SessionRepository(':memory:');
   const worker = new StdioJsonRpcWorkerClient(process.execPath, [fixturePath()]);
   const publisher = new InMemorySlackPublisher();
 
@@ -242,12 +244,10 @@ test('integration treats a DM with thread_ts but without parent_user_id as a new
 
   await worker.close();
   repository.close();
-  cleanupDir(tempDir);
 });
 
 test('integration converts completed markdown to mrkdwn before posting to Slack', async () => {
-  const tempDir = createTempDir();
-  const repository = new SessionRepository(join(tempDir, 'app.sqlite'));
+  const repository = new SessionRepository(':memory:');
   const worker = new StdioJsonRpcWorkerClient(process.execPath, [fixturePath()]);
   const publisher = new InMemorySlackPublisher();
 
@@ -261,17 +261,7 @@ test('integration converts completed markdown to mrkdwn before posting to Slack'
   gateway = new Gateway(orchestrator, publisher);
 
   await gateway.notifyCompleted(
-    {
-      session_id: 'S1',
-      slack_team_id: 'T1',
-      slack_channel_id: 'D1',
-      slack_root_thread_ts: '500.1',
-      codex_thread_id: 'thread-1',
-      state: 'idle',
-      pending_approval_id: null,
-      created_at: '2026-03-20T00:00:00.000Z',
-      updated_at: '2026-03-20T00:00:00.000Z',
-    },
+    createSessionFixture(),
     ['# Heading', '', '- **bold** item', '- [example](https://example.com)'].join('\n'),
   );
 
@@ -284,12 +274,11 @@ test('integration converts completed markdown to mrkdwn before posting to Slack'
 
   await worker.close();
   repository.close();
-  cleanupDir(tempDir);
 });
 
 test('integration uploads a completed local image path to the Slack thread', async () => {
   const tempDir = createTempDir();
-  const repository = new SessionRepository(join(tempDir, 'app.sqlite'));
+  const repository = new SessionRepository(':memory:');
   const worker = new StdioJsonRpcWorkerClient(process.execPath, [fixturePath()]);
   const publisher = new InMemorySlackPublisher();
 
@@ -306,17 +295,7 @@ test('integration uploads a completed local image path to the Slack thread', asy
   writeFileSync(imagePath, 'image');
 
   await gateway.notifyCompleted(
-    {
-      session_id: 'S1',
-      slack_team_id: 'T1',
-      slack_channel_id: 'D1',
-      slack_root_thread_ts: '500.1',
-      codex_thread_id: 'thread-1',
-      state: 'idle',
-      pending_approval_id: null,
-      created_at: '2026-03-20T00:00:00.000Z',
-      updated_at: '2026-03-20T00:00:00.000Z',
-    },
+    createSessionFixture(),
     `画像です: ${imagePath}`,
   );
 

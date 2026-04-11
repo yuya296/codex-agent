@@ -25,11 +25,8 @@ export interface CodexThreadRef {
 }
 
 export interface Session extends SlackThreadRef, CodexThreadRef {
-  session_id: string;
   state: SessionState;
   pending_approval_id: string | null;
-  created_at: string;
-  updated_at: string;
 }
 
 export type ApprovalDecision = 'approve' | 'reject';

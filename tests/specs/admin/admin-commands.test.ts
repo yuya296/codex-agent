@@ -14,16 +14,16 @@ test('admin commands accept slash command syntax even when the input starts with
 
 test('admin commands render help and status responses as operator-facing English text', async () => {
   const handler = createAdminCommandHandler({
-    getStatusContext: async () => ({
-      processUptimeSeconds: 12.7,
-      codexHome: '/root/.codex',
-      redisUrl: 'redis://redis:6379',
-      sqlitePath: '/data/app.sqlite',
-      workerCommand: 'codex',
-      workerArgs: ['app-server'],
-      workerCwd: '/app',
-      slackAgentChatStatusEnabled: true,
-    }),
+    getStatusContext: async () =>
+      ({
+        processUptimeSeconds: 12.7,
+        codexHome: '/root/.codex',
+        redisUrl: 'redis://redis:6379',
+        workerCommand: 'codex',
+        workerArgs: ['app-server'],
+        workerCwd: '/app',
+        slackAgentChatStatusEnabled: true,
+      } as any),
     restartWorker: async () => {},
     getCodexVersion: async () => 'codex-cli 0.116.0',
     getLatestCodexVersion: async () => '0.116.0',

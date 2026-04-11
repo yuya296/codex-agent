@@ -14,16 +14,11 @@ import {
 
 function createSession() {
   return {
-    session_id: 'S1',
     slack_team_id: 'T1',
     slack_channel_id: 'D1',
     slack_root_thread_ts: '100.1',
     codex_thread_id: 'thread-1',
-    state: 'running' as const,
-    pending_approval_id: null,
-    created_at: '2026-03-20T00:00:00.000Z',
-    updated_at: '2026-03-20T00:00:00.000Z',
-  };
+  } as any;
 }
 
 test('gateway presentation turns loading text into a single Slack-friendly line before posting', () => {

@@ -126,6 +126,72 @@ Slack で Bot に DM を送り、次を確認します。
 3. 承認要求時に `Approve/Reject` ボタンが表示される
 4. `SLACK_AGENT_CHAT_STATUS_ENABLED=true` の場合、進捗中に AgentChat の loading status が表示される
 
+## Redis 移行チェックリスト
+
+Socket Mode や SQLite ベースの旧構成から、現在の webhook + Redis 構成へ切り替えるときは次の順で進めます。
+
+### 1. Slack App 設定を揃える
+
+1. `OAuth & Permissions` で次の Bot Token Scopes が入っていることを確認
+   - `chat:write`
+   - `im:history`
+   - `files:write`
+   - `files:read`
+   - `assistant:write` (`SLACK_AGENT_CHAT_STATUS_ENABLED=true` を使う場合だけ)
+2. `Event Subscriptions` を ON にして、`Request URL` を `https://<your-domain>/api/webhooks/slack` に更新
+3. `Subscribe to bot events` に次が入っていることを確認
+   - `app_mention`
+   - `message.im`
+   - `assistant_thread_started`
+   - `assistant_thread_context_changed`
+4. `Interactivity & Shortcuts` を ON にして、Request URL も同じ `/api/webhooks/slack` に合わせる
+5. `App Home` の `Messages Tab` と `Allow users to send Slash commands and messages from the messages tab` を ON にする
+6. 設定を変えたら `Reinstall to Workspace` を実行して token を更新する
+
+### 2. アプリ側の環境変数を切り替える
+
+最低限、次を webhook + Redis 構成の値にします。
+
+- `SLACK_BOT_TOKEN`
+- `SLACK_SIGNING_SECRET`
+- `REDIS_URL`
+- `SLACK_AGENT_CHAT_STATUS_ENABLED`
+- `PORT`
+
+SQLite セッションを Redis に引き継ぐ場合だけ、初回起動時に `SESSION_MIGRATION_SQLITE_PATH` を追加します。
+
+例:
+
+```bash
+export SLACK_BOT_TOKEN='xoxb-...'
+export SLACK_SIGNING_SECRET='...'
+export REDIS_URL='redis://localhost:6379'
+export SLACK_AGENT_CHAT_STATUS_ENABLED=true
+export SESSION_MIGRATION_SQLITE_PATH='./data/app.sqlite'
+```
+
+### 3. 一回だけセッションを移行する
+
+1. Redis を起動する
+2. `SESSION_MIGRATION_SQLITE_PATH` を設定した状態で `npm start` または `docker compose up -d --build` を実行する
+3. 起動ログに `migrated N sessions from sqlite` が出ることを確認する
+4. 移行が終わったら `SESSION_MIGRATION_SQLITE_PATH` を unset する
+
+この変数を残したままでも既存 Redis データは上書きしませんが、恒常設定にはしないほうが安全です。
+
+### 4. Slack から疎通確認する
+
+1. Bot に新規 DM を送って新しい session が始まること
+2. 同じ thread 返信が継続入力として扱われること
+3. 承認待ちで `Approve/Reject` が出ること
+4. `SLACK_AGENT_CHAT_STATUS_ENABLED=true` のときだけ loading status が出ること
+
+### 5. 切替後に戻すもの
+
+- `SESSION_MIGRATION_SQLITE_PATH` を削除
+- 古い Socket Mode 用の app token / env が残っていれば削除
+- 旧 SQLite ファイルを参照する運用メモや deploy 設定が残っていれば削除
+
 ## トラブルシュート
 
 - `not_authed` / `invalid_auth`

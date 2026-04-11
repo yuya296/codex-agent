@@ -16,8 +16,8 @@ app 自体は image 内の `/app` で動作し、Codex worker の作業対象も
 ## 使うパス
 
 - Codex 認証: `./.docker/codex-home`
+- 旧 SQLite セッション移行元: `./.docker/data`
 - Playwright agent profile: `./.docker/playwright-agent-profile`
-- SQLite: `./.docker/data/app.sqlite`
 
 これらは bind mount です。host の通常 `.codex` や普段使いの Chrome profile は共有しません。
 
@@ -35,12 +35,12 @@ app 自体は image 内の `/app` で動作し、Codex worker の作業対象も
 | `DEBUG_WORKER_EVENTS` | 任意 | `false` | worker の主要イベントをログ出力する |
 | `DEBUG_WORKER_EVENT_DELTAS` | 任意 | `false` | 高頻度な delta イベントも追加でログ出力する |
 | `CODEX_HOME` | 任意 | `/root/.codex` | container 内の Codex 認証・設定ディレクトリ |
+| `SESSION_MIGRATION_SQLITE_PATH` | 任意 | なし | 旧 SQLite セッションを Redis に一度だけ移すときの読み取り元パス |
 | `CODEX_WORKER_COMMAND` | 任意 | `codex` | worker プロセス起動コマンド |
 | `CODEX_WORKER_ARGS` | 任意 | `app-server` | worker 起動時の引数 |
 | `CODEX_WORKER_CWD` | 任意 | `/app` | worker の作業ディレクトリ |
 | `WORKER_STREAM_EVENT_TIMEOUT_MS` | 任意 | `300000` | worker turn 内で無通信を許容する最大時間(ms) |
 | `REDIS_URL` | 必須 | `redis://redis:6379` | Chat SDK の thread subscription/state backend |
-| `SQLITE_PATH` | 任意 | `/data/app.sqlite` | SQLite ファイルの保存先 |
 | `PORT` | 任意 | `3000` | Hono webhook server の待受ポート |
 | `PLAYWRIGHT_AGENT_PROFILE_DIR` | 任意 | `/profiles/agent` | Playwright 用ブラウザ profile の保存先 |
 | `PLAYWRIGHT_MCP_CONFIG` | 任意 | `/run/playwright/cli.config.json` | Playwright MCP の設定ファイルパス |
@@ -81,6 +81,8 @@ container 内確認:
 ```bash
 docker compose exec app sh -lc 'echo $CODEX_HOME && echo $CODEX_WORKER_CWD'
 ```
+
+既存の SQLite から移行する場合は、`.env` に `SESSION_MIGRATION_SQLITE_PATH=/data/app.sqlite` を入れて一度だけ起動します。移行後は unset に戻してください。
 
 ## timeout / hang 切り分け
 

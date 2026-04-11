@@ -14,12 +14,12 @@ services:
       DEBUG_WORKER_EVENTS: ${DEBUG_WORKER_EVENTS:-false}
       DEBUG_WORKER_EVENT_DELTAS: ${DEBUG_WORKER_EVENT_DELTAS:-false}
       CODEX_HOME: ${CODEX_HOME:-/root/.codex}
+      SESSION_MIGRATION_SQLITE_PATH: ${SESSION_MIGRATION_SQLITE_PATH:-}
       CODEX_WORKER_COMMAND: ${CODEX_WORKER_COMMAND:-codex}
       CODEX_WORKER_ARGS: ${CODEX_WORKER_ARGS:-app-server}
       CODEX_WORKER_CWD: ${CODEX_WORKER_CWD:-/app}
       WORKER_STREAM_EVENT_TIMEOUT_MS: ${WORKER_STREAM_EVENT_TIMEOUT_MS:-300000}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
-      SQLITE_PATH: ${SQLITE_PATH:-/data/app.sqlite}
       PORT: ${PORT:-3000}
       PLAYWRIGHT_AGENT_PROFILE_DIR: ${PLAYWRIGHT_AGENT_PROFILE_DIR:-/profiles/agent}
       PLAYWRIGHT_MCP_CONFIG: ${PLAYWRIGHT_MCP_CONFIG:-/run/playwright/cli.config.json}
@@ -29,8 +29,8 @@ services:
       - "${PORT:-3000}:${PORT:-3000}"
     volumes:
       - ./.docker/codex-home:/root/.codex
-      - ./.docker/playwright-agent-profile:/profiles/agent
       - ./.docker/data:/data
+      - ./.docker/playwright-agent-profile:/profiles/agent
     stdin_open: true
     tty: true
   redis:

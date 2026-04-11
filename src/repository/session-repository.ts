@@ -1,165 +1,87 @@
-import { randomUUID } from 'node:crypto';
-import { DatabaseSync } from 'node:sqlite';
-import { mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
-import { SESSION_STATES, type ChannelThreadRef, type Session, type SessionState } from '../domain/types.js';
+import type { StateAdapter } from 'chat';
+import { type ChannelThreadRef, type Session, type SessionState } from '../domain/types.js';
 
 interface CreateSessionInput extends ChannelThreadRef {
   codex_thread_id: string;
   state: SessionState;
 }
 
-interface UpdateSessionStateInput {
-  session_id: string;
+interface UpdateSessionStateInput extends ChannelThreadRef {
   state: SessionState;
   pending_approval_id?: string | null;
 }
 
-const sessionStateCheck = SESSION_STATES.map((s) => `'${s}'`).join(', ');
+type SessionStateStore = Pick<StateAdapter, 'get' | 'set' | 'setIfNotExists'>;
 
 export class SessionRepository {
-  private readonly db: DatabaseSync;
+  private readonly memory = new Map<string, Session>();
 
-  public constructor(dbPath: string) {
-    if (dbPath !== ':memory:') {
-      mkdirSync(dirname(dbPath), { recursive: true });
-    }
-    this.db = new DatabaseSync(dbPath);
-    this.db.exec('PRAGMA foreign_keys = ON;');
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS sessions (
-        session_id TEXT PRIMARY KEY,
-        slack_team_id TEXT NOT NULL,
-        slack_channel_id TEXT NOT NULL,
-        slack_root_thread_ts TEXT NOT NULL,
-        codex_thread_id TEXT NOT NULL,
-        state TEXT NOT NULL CHECK (state IN (${sessionStateCheck})),
-        pending_approval_id TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        UNIQUE (slack_team_id, slack_channel_id, slack_root_thread_ts)
-      );
-    `);
-  }
+  public constructor(private readonly store: SessionStateStore | ':memory:' = ':memory:') {}
 
   public close(): void {
-    this.db.close();
+    this.memory.clear();
   }
 
-  public createSession(input: CreateSessionInput): Session {
-    const now = new Date().toISOString();
+  public async createSession(input: CreateSessionInput): Promise<Session> {
     const session: Session = {
-      session_id: randomUUID(),
       slack_team_id: input.channel_team_id,
       slack_channel_id: input.channel_id,
       slack_root_thread_ts: input.channel_thread_id,
       codex_thread_id: input.codex_thread_id,
       state: input.state,
       pending_approval_id: null,
-      created_at: now,
-      updated_at: now,
     };
+    const key = toSessionKey(input);
 
-    this.db
-      .prepare(
-        `
-          INSERT INTO sessions (
-            session_id,
-            slack_team_id,
-            slack_channel_id,
-            slack_root_thread_ts,
-            codex_thread_id,
-            state,
-            pending_approval_id,
-            created_at,
-            updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `,
-      )
-      .run(
-        session.session_id,
-        session.slack_team_id,
-        session.slack_channel_id,
-        session.slack_root_thread_ts,
-        session.codex_thread_id,
-        session.state,
-        session.pending_approval_id,
-        session.created_at,
-        session.updated_at,
-      );
+    if (this.store === ':memory:') {
+      if (this.memory.has(key)) {
+        throw new Error('session already exists for channel thread');
+      }
+      this.memory.set(key, session);
+      return session;
+    }
+
+    const created = await this.store.setIfNotExists(key, session);
+    if (!created) {
+      throw new Error('session already exists for channel thread');
+    }
 
     return session;
   }
 
-  public findByChannelThread(ref: ChannelThreadRef): Session | null {
-    const row = this.db
-      .prepare(
-        `
-          SELECT
-            session_id,
-            slack_team_id,
-            slack_channel_id,
-            slack_root_thread_ts,
-            codex_thread_id,
-            state,
-            pending_approval_id,
-            created_at,
-            updated_at
-          FROM sessions
-          WHERE slack_team_id = ?
-            AND slack_channel_id = ?
-            AND slack_root_thread_ts = ?
-          LIMIT 1
-        `,
-      )
-      .get(ref.channel_team_id, ref.channel_id, ref.channel_thread_id) as Session | undefined;
-
-    return row ?? null;
-  }
-
-  public findById(sessionId: string): Session | null {
-    const row = this.db
-      .prepare(
-        `
-          SELECT
-            session_id,
-            slack_team_id,
-            slack_channel_id,
-            slack_root_thread_ts,
-            codex_thread_id,
-            state,
-            pending_approval_id,
-            created_at,
-            updated_at
-          FROM sessions
-          WHERE session_id = ?
-          LIMIT 1
-        `,
-      )
-      .get(sessionId) as Session | undefined;
-
-    return row ?? null;
-  }
-
-  public updateSessionState(input: UpdateSessionStateInput): Session {
-    const now = new Date().toISOString();
-
-    this.db
-      .prepare(
-        `
-          UPDATE sessions
-          SET state = ?,
-              pending_approval_id = ?,
-              updated_at = ?
-          WHERE session_id = ?
-        `,
-      )
-      .run(input.state, input.pending_approval_id ?? null, now, input.session_id);
-
-    const updated = this.findById(input.session_id);
-    if (!updated) {
-      throw new Error(`session not found after update: ${input.session_id}`);
+  public async findByChannelThread(ref: ChannelThreadRef): Promise<Session | null> {
+    if (this.store === ':memory:') {
+      return this.memory.get(toSessionKey(ref)) ?? null;
     }
+
+    return this.store.get<Session>(toSessionKey(ref));
+  }
+
+  public async updateSessionState(input: UpdateSessionStateInput): Promise<Session> {
+    const current = await this.findByChannelThread(input);
+    if (!current) {
+      throw new Error(
+        `session not found for channel thread: ${input.channel_team_id}/${input.channel_id}/${input.channel_thread_id}`,
+      );
+    }
+
+    const updated: Session = {
+      ...current,
+      state: input.state,
+      pending_approval_id: input.pending_approval_id ?? null,
+    };
+    const key = toSessionKey(input);
+
+    if (this.store === ':memory:') {
+      this.memory.set(key, updated);
+      return updated;
+    }
+
+    await this.store.set(key, updated);
     return updated;
   }
+}
+
+function toSessionKey(ref: ChannelThreadRef): string {
+  return `session:${ref.channel_team_id}:${ref.channel_id}:${ref.channel_thread_id}`;
 }

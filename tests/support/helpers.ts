@@ -1,7 +1,6 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import type { Session } from '../../src/domain/types.js';
 import type { GatewayNotifier } from '../../src/orchestrator/orchestrator.js';
 import type { WorkerClient, WorkerRunEvent, WorkerRunOptions } from '../../src/worker/types.js';
 
@@ -90,28 +89,23 @@ export class MockNotifier implements GatewayNotifier {
   public readonly approvalEvents: Array<{ approval_id: string; prompt: string }> = [];
   public readonly completedMessages: string[] = [];
   public readonly failedMessages: string[] = [];
-  public readonly touchedSessionIds: string[] = [];
 
-  public async notifyProgress(session: Session, message: string): Promise<void> {
-    this.touchedSessionIds.push(session.session_id);
+  public async notifyProgress(_session: unknown, message: string): Promise<void> {
     this.progressMessages.push(message);
   }
 
   public async notifyApproval(
-    session: Session,
+    _session: unknown,
     approval: { approval_id: string; prompt: string },
   ): Promise<void> {
-    this.touchedSessionIds.push(session.session_id);
     this.approvalEvents.push(approval);
   }
 
-  public async notifyCompleted(session: Session, message: string): Promise<void> {
-    this.touchedSessionIds.push(session.session_id);
+  public async notifyCompleted(_session: unknown, message: string): Promise<void> {
     this.completedMessages.push(message);
   }
 
-  public async notifyFailed(session: Session, message: string): Promise<void> {
-    this.touchedSessionIds.push(session.session_id);
+  public async notifyFailed(_session: unknown, message: string): Promise<void> {
     this.failedMessages.push(message);
   }
 }

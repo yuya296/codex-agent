@@ -7,7 +7,7 @@ Slack DM と Codex (`codex app-server`) をつなぐ最小構成のエージェ�
 
 ## 必要環境
 
-- Node.js 24 系（`node:sqlite` を利用）
+- Node.js 24 系
 - npm
 - Codex CLI（`codex app-server` が使えるバージョン）
 - Slack App の認証情報
@@ -35,11 +35,11 @@ export REDIS_URL='redis://localhost:6379'
 
 - `SLACK_BOT_USERNAME`
 - `CODEX_HOME`
+- `SESSION_MIGRATION_SQLITE_PATH`
 - `CODEX_WORKER_COMMAND`
 - `CODEX_WORKER_ARGS`
 - `CODEX_WORKER_CWD`
 - `WORKER_STREAM_EVENT_TIMEOUT_MS`
-- `SQLITE_PATH`
 - `SLACK_AGENT_CHAT_STATUS_ENABLED`
 - `DEBUG_SLACK_EVENTS`
 - `DEBUG_WORKER_EVENTS`
@@ -53,9 +53,9 @@ export REDIS_URL='redis://localhost:6379'
 - `SLACK_BOT_USERNAME`: `codex-agent`
 - `CODEX_HOME`: `$CODEX_HOME` があればそれ、なければ `~/.codex`
 - `REDIS_URL`: 必須
+- `SESSION_MIGRATION_SQLITE_PATH`: 未設定
 - `WORKER_STREAM_EVENT_TIMEOUT_MS`: `300000`
 - `SLACK_AGENT_CHAT_STATUS_ENABLED`: `false`
-- `SQLITE_PATH`: `./data/app.sqlite`
 
 ## Docs
 
@@ -86,8 +86,6 @@ npm run doctor
 - `npm install` 済みか
 - `codex` コマンド実行可否
 - `codex app-server` サブコマンド有無
-- `node:sqlite` のロード可否
-- `sqlite3` CLI（任意、未導入は WARN）
 
 ## 起動
 
@@ -110,7 +108,6 @@ Docker では次を使います。
 
 - Codex 認証: `./.docker/codex-home`
 - Playwright profile: `./.docker/playwright-agent-profile`
-- SQLite: `./.docker/data/app.sqlite`
 - app / worker の作業ディレクトリ: `/app`
 
 詳細は [docs/docker.md](./docs/docker.md) を参照してください。
@@ -139,16 +136,18 @@ DEBUG_SLACK_EVENTS=false
 DEBUG_WORKER_EVENTS=false
 DEBUG_WORKER_EVENT_DELTAS=false
 CODEX_HOME=/root/.codex
+SESSION_MIGRATION_SQLITE_PATH=
 CODEX_WORKER_COMMAND=codex
 CODEX_WORKER_ARGS="app-server"
 CODEX_WORKER_CWD=/app
 WORKER_STREAM_EVENT_TIMEOUT_MS=300000
-SQLITE_PATH=./data/app.sqlite
 SLACK_AGENT_CHAT_STATUS_ENABLED=false
 PORT=
 ```
 
 `SLACK_AGENT_CHAT_STATUS_ENABLED=true` にすると、進捗通知に `assistant.threads.setStatus` を使います。classic な DM スレッド返信を維持したい場合は、Slack App 側の `Agent or Assistant` は OFF にしてください。
+
+既存の SQLite セッションを Redis へ一度だけ移したい場合は、起動時に `SESSION_MIGRATION_SQLITE_PATH` に旧 DB パスを設定します。未設定なら移行処理は走りません。
 
 Webhook は `POST /api/webhooks/slack` で受けます。ローカルで Slack と疎通させる場合は、`PORT` で公開した HTTP endpoint を ngrok などで外部公開してください。
 

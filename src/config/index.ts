@@ -7,7 +7,7 @@ export interface AppConfig {
   slackBotUserName: string;
   codexHome: string;
   redisUrl: string;
-  sqlitePath: string;
+  sessionMigrationSqlitePath?: string;
   slackAgentChatStatusEnabled: boolean;
   workerCommand: string;
   workerArgs: string[];
@@ -25,6 +25,10 @@ export function loadConfigFromEnv(env: NodeJS.ProcessEnv = process.env): AppConf
   const slackBotUserName = env.SLACK_BOT_USERNAME?.trim() || 'codex-agent';
   const codexHome = expandHome(env.CODEX_HOME?.trim() || join(homedir(), '.codex'));
   const redisUrl = readRequiredString(env.REDIS_URL, 'REDIS_URL');
+  const sessionMigrationSqlitePath = readOptionalString(
+    env.SESSION_MIGRATION_SQLITE_PATH,
+    'SESSION_MIGRATION_SQLITE_PATH',
+  );
   const workerCommand = env.CODEX_WORKER_COMMAND?.trim() || 'codex';
   const workerArgs = parseWorkerArgs(env.CODEX_WORKER_ARGS ?? 'app-server');
   const workerCwd = readOptionalString(env.CODEX_WORKER_CWD, 'CODEX_WORKER_CWD');
@@ -33,7 +37,6 @@ export function loadConfigFromEnv(env: NodeJS.ProcessEnv = process.env): AppConf
     'WORKER_STREAM_EVENT_TIMEOUT_MS',
     5 * 60 * 1000,
   );
-  const sqlitePath = expandHome(env.SQLITE_PATH?.trim() || './data/app.sqlite');
   const slackAgentChatStatusEnabled = parseOptionalBoolean(
     env.SLACK_AGENT_CHAT_STATUS_ENABLED,
     'SLACK_AGENT_CHAT_STATUS_ENABLED',
@@ -47,7 +50,9 @@ export function loadConfigFromEnv(env: NodeJS.ProcessEnv = process.env): AppConf
     slackBotUserName,
     codexHome,
     redisUrl,
-    sqlitePath,
+    sessionMigrationSqlitePath: sessionMigrationSqlitePath
+      ? expandHome(sessionMigrationSqlitePath)
+      : undefined,
     slackAgentChatStatusEnabled,
     workerCommand,
     workerArgs,

@@ -1,21 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { join } from 'node:path';
 import { Orchestrator } from '../../../src/orchestrator/orchestrator.js';
 import { SessionRepository } from '../../../src/repository/session-repository.js';
-import { cleanupDir, createTempDir, MockNotifier, MockWorkerClient } from '../../support/helpers.js';
+import { MockNotifier, MockWorkerClient } from '../../support/helpers.js';
 
 function createDeps() {
-  const tempDir = createTempDir();
-  const repository = new SessionRepository(join(tempDir, 'app.sqlite'));
+  const repository = new SessionRepository(':memory:');
   const worker = new MockWorkerClient();
   const notifier = new MockNotifier();
   const orchestrator = new Orchestrator(repository, worker, notifier);
-  return { tempDir, repository, worker, notifier, orchestrator };
+  return { repository, worker, notifier, orchestrator };
 }
 
 test('session lifecycle treats messages sent during running sessions as steer input', async () => {
-  const { tempDir, repository, worker, notifier, orchestrator } = createDeps();
+  const { repository, worker, notifier, orchestrator } = createDeps();
 
   worker.sendUserMessageImpl = async ({ text }) => [{ type: 'progress', message: `working:${text}` }];
   worker.sendSteerMessageImpl = async ({ text }) => [{ type: 'progress', message: `steer:${text}` }];
@@ -43,11 +41,10 @@ test('session lifecycle treats messages sent during running sessions as steer in
   assert.deepEqual(notifier.progressMessages, ['thinking...', 'working:first', 'thinking...', 'steer:second']);
 
   repository.close();
-  cleanupDir(tempDir);
 });
 
 test('session lifecycle rejects the current approval and starts a new turn when a message arrives during waiting_approval', async () => {
-  const { tempDir, repository, worker, notifier, orchestrator } = createDeps();
+  const { repository, worker, notifier, orchestrator } = createDeps();
 
   worker.sendUserMessageImpl = async ({ text }) => {
     if (text === 'first') {
@@ -70,7 +67,7 @@ test('session lifecycle rejects the current approval and starts a new turn when 
     text: 'first',
   });
 
-  const sessionBefore = repository.findByChannelThread({
+  const sessionBefore = await repository.findByChannelThread({
     channel_team_id: 'T1',
     channel_id: 'D1',
     channel_thread_id: '111.2',
@@ -98,11 +95,10 @@ test('session lifecycle rejects the current approval and starts a new turn when 
   assert.deepEqual(notifier.progressMessages, ['thinking...', 'thinking...']);
 
   repository.close();
-  cleanupDir(tempDir);
 });
 
 test('session lifecycle forwards approval decisions to the worker for the current session', async () => {
-  const { tempDir, repository, worker, notifier, orchestrator } = createDeps();
+  const { repository, worker, notifier, orchestrator } = createDeps();
 
   worker.sendUserMessageImpl = async () => [
     {
@@ -135,11 +131,10 @@ test('session lifecycle forwards approval decisions to the worker for the curren
   assert.deepEqual(notifier.progressMessages, ['thinking...', 'thinking...']);
 
   repository.close();
-  cleanupDir(tempDir);
 });
 
 test('session lifecycle keeps failed sessions resumable from the same Slack thread', async () => {
-  const { tempDir, repository, worker, orchestrator, notifier } = createDeps();
+  const { repository, worker, orchestrator, notifier } = createDeps();
 
   let first = true;
   worker.sendUserMessageImpl = async ({ text }) => {
@@ -173,11 +168,10 @@ test('session lifecycle keeps failed sessions resumable from the same Slack thre
   assert.deepEqual(notifier.progressMessages, ['thinking...', 'thinking...']);
 
   repository.close();
-  cleanupDir(tempDir);
 });
 
 test('session lifecycle starts a new session when a reply arrives without a known session mapping', async () => {
-  const { tempDir, repository, worker, notifier, orchestrator } = createDeps();
+  const { repository, worker, notifier, orchestrator } = createDeps();
 
   worker.sendUserMessageImpl = async ({ text }) => [{ type: 'completed', message: `done:${text}` }];
 
@@ -193,19 +187,19 @@ test('session lifecycle starts a new session when a reply arrives without a know
   assert.deepEqual(worker.callLog, ['createThread', 'sendUserMessage']);
   assert.deepEqual(notifier.progressMessages, ['thinking...']);
 
-  const saved = repository.findByChannelThread({
+  const saved = await repository.findByChannelThread({
     channel_team_id: 'T1',
     channel_id: 'D1',
     channel_thread_id: '111.5',
   });
-  assert.equal(saved?.session_id, started.session_id);
+  assert.equal(saved?.codex_thread_id, 'thread-1');
+  assert.equal(saved?.state, 'idle');
 
   repository.close();
-  cleanupDir(tempDir);
 });
 
 test('session lifecycle updates notifier state from streaming worker callbacks even when the final event array is empty', async () => {
-  const { tempDir, repository, worker, notifier, orchestrator } = createDeps();
+  const { repository, worker, notifier, orchestrator } = createDeps();
 
   worker.sendUserMessageImpl = async ({ text }, options) => {
     await options?.onEvent?.({ type: 'progress', message: `stream:${text}` });
@@ -226,5 +220,4 @@ test('session lifecycle updates notifier state from streaming worker callbacks e
   assert.deepEqual(notifier.completedMessages, ['done:live']);
 
   repository.close();
-  cleanupDir(tempDir);
 });

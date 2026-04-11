@@ -2,9 +2,8 @@
 
 import { readFile } from 'node:fs/promises';
 import { serve, type ServerType } from '@hono/node-server';
-import { createRedisState } from '@chat-adapter/state-redis';
 import { createSlackAdapter, type SlackAdapter } from '@chat-adapter/slack';
-import { Chat, type CardElement } from 'chat';
+import { Chat, type CardElement, type StateAdapter } from 'chat';
 import { Hono } from 'hono';
 import type { Gateway, SlackApprovalAction, SlackPublisher } from './gateway.js';
 import { buildSlackMessageEvent, type RawSlackMessageEvent } from './slack-message-event.js';
@@ -21,7 +20,7 @@ interface ChatGatewayRuntimeConfig {
   botToken: string;
   signingSecret: string;
   botUserName: string;
-  redisUrl: string;
+  state: StateAdapter;
 }
 
 interface SlackPublisherOptions {
@@ -41,9 +40,7 @@ export function createChatGatewayRuntime(
     adapters: {
       slack: slackAdapter,
     },
-    state: createRedisState({
-      url: config.redisUrl,
-    }),
+    state: config.state,
   });
 
   bot.onNewMention(async (thread, message) => {
@@ -108,9 +105,9 @@ export function createChatGatewayRuntime(
       });
     },
     stop: async () => {
-      await bot.shutdown();
       server?.close();
       server = null;
+      await bot.shutdown();
     },
   };
 }

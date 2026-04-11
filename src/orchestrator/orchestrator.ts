@@ -2,6 +2,7 @@ import type {
   ContinueSessionInput,
   ResolveApprovalInput,
   Session,
+  SessionState,
   StartSessionInput,
 } from '../domain/types.js';
 import { SessionRepository } from '../repository/session-repository.js';
@@ -22,13 +23,13 @@ export class Orchestrator {
   ) {}
 
   public async startSession(input: StartSessionInput): Promise<Session> {
-    const existing = this.repository.findByChannelThread(input);
+    const existing = await this.repository.findByChannelThread(input);
     if (existing) {
       throw new Error('session already exists for channel thread');
     }
 
     const { codex_thread_id } = await this.workerClient.createThread();
-    let session = this.repository.createSession({
+    const session = await this.repository.createSession({
       ...input,
       codex_thread_id,
       state: 'running',
@@ -42,16 +43,12 @@ export class Orchestrator {
   }
 
   public async continueSession(input: ContinueSessionInput): Promise<Session> {
-    const session = this.repository.findByChannelThread(input);
+    const session = await this.repository.findByChannelThread(input);
     if (!session) {
       return this.startSession(input);
     }
 
-    let current = this.repository.updateSessionState({
-      session_id: session.session_id,
-      state: 'running',
-      pending_approval_id: null,
-    });
+    let current = await this.updateSessionState(session, 'running');
 
     try {
       if (session.state === 'running') {
@@ -72,11 +69,7 @@ export class Orchestrator {
           }, { onEvent }),
           { notifyProgress: false },
         );
-        current = this.repository.updateSessionState({
-          session_id: current.session_id,
-          state: 'running',
-          pending_approval_id: null,
-        });
+        current = await this.updateSessionState(current, 'running');
       }
 
       return this.runWorkerFlow(current, async (onEvent) => this.workerClient.sendUserMessage({
@@ -85,22 +78,18 @@ export class Orchestrator {
         text: input.text,
       }, { onEvent }));
     } catch (error) {
-      return this.failSession(session.session_id, error);
+      return this.failSession(session, error);
     }
   }
 
   public async resolveApproval(input: ResolveApprovalInput): Promise<Session> {
-    const session = this.repository.findByChannelThread(input);
+    const session = await this.repository.findByChannelThread(input);
     if (!session) {
       throw new Error('session not found for approval');
     }
 
     const approvalId = session.pending_approval_id ?? input.approval_id;
-    const running = this.repository.updateSessionState({
-      session_id: session.session_id,
-      state: 'running',
-      pending_approval_id: null,
-    });
+    const running = await this.updateSessionState(session, 'running');
 
     return this.runWorkerFlow(running, async (onEvent) => this.workerClient.sendApprovalDecision({
       codex_thread_id: session.codex_thread_id,
@@ -132,18 +121,28 @@ export class Orchestrator {
 
       return current;
     } catch (error) {
-      return this.failSession(session.session_id, error);
+      return this.failSession(session, error);
     }
   }
 
-  private async failSession(sessionId: string, error: unknown): Promise<Session> {
-    const failed = this.repository.updateSessionState({
-      session_id: sessionId,
-      state: 'failed',
-      pending_approval_id: null,
-    });
+  private async failSession(session: Session, error: unknown): Promise<Session> {
+    const failed = await this.updateSessionState(session, 'failed');
     await this.notifier.notifyFailed(failed, `worker execution failed: ${String(error)}`);
     return failed;
+  }
+
+  private async updateSessionState(
+    session: Session,
+    state: SessionState,
+    pendingApprovalId?: string | null,
+  ): Promise<Session> {
+    return this.repository.updateSessionState({
+      channel_team_id: session.slack_team_id,
+      channel_id: session.slack_channel_id,
+      channel_thread_id: session.slack_root_thread_ts,
+      state,
+      pending_approval_id: pendingApprovalId,
+    });
   }
 
   private async applyWorkerEvents(session: Session, events: WorkerRunEvent[]): Promise<Session> {
@@ -158,21 +157,13 @@ export class Orchestrator {
 
   private async applyWorkerEvent(session: Session, event: WorkerRunEvent): Promise<Session> {
     if (event.type === 'progress') {
-      const current = this.repository.updateSessionState({
-        session_id: session.session_id,
-        state: 'running',
-        pending_approval_id: null,
-      });
+      const current = await this.updateSessionState(session, 'running');
       await this.notifier.notifyProgress(current, event.message);
       return current;
     }
 
     if (event.type === 'approval_required') {
-      const current = this.repository.updateSessionState({
-        session_id: session.session_id,
-        state: 'waiting_approval',
-        pending_approval_id: event.approval_id,
-      });
+      const current = await this.updateSessionState(session, 'waiting_approval', event.approval_id);
       await this.notifier.notifyApproval(current, {
         approval_id: event.approval_id,
         prompt: event.prompt,
@@ -181,20 +172,12 @@ export class Orchestrator {
     }
 
     if (event.type === 'completed') {
-      const current = this.repository.updateSessionState({
-        session_id: session.session_id,
-        state: 'idle',
-        pending_approval_id: null,
-      });
+      const current = await this.updateSessionState(session, 'idle');
       await this.notifier.notifyCompleted(current, event.message);
       return current;
     }
 
-    const current = this.repository.updateSessionState({
-      session_id: session.session_id,
-      state: 'failed',
-      pending_approval_id: null,
-    });
+    const current = await this.updateSessionState(session, 'failed');
     await this.notifier.notifyFailed(current, event.error);
     return current;
   }
