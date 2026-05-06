@@ -26,11 +26,7 @@
 - `specs/config/`
   - 環境変数と設定解決の仕様
 - `specs/gateway/`
-  - Slack 入出力と presentation の仕様
-- `specs/orchestrator/`
-  - session lifecycle の仕様
-- `specs/repository/`
-  - 永続化ルールの仕様
+  - Chat SDK thread / Slack presentation / approval flow の仕様
 - `specs/worker/`
   - worker runtime / protocol / helper の仕様
 

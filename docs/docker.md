@@ -16,7 +16,6 @@ app 自体は image 内の `/app` で動作し、Codex worker の作業対象も
 ## 使うパス
 
 - Codex 認証: `./.docker/codex-home`
-- 旧 SQLite セッション移行元: `./.docker/data`
 - Playwright agent profile: `./.docker/playwright-agent-profile`
 
 これらは bind mount です。host の通常 `.codex` や普段使いの Chrome profile は共有しません。
@@ -35,7 +34,6 @@ app 自体は image 内の `/app` で動作し、Codex worker の作業対象も
 | `DEBUG_WORKER_EVENTS` | 任意 | `false` | worker の主要イベントをログ出力する |
 | `DEBUG_WORKER_EVENT_DELTAS` | 任意 | `false` | 高頻度な delta イベントも追加でログ出力する |
 | `CODEX_HOME` | 任意 | `/root/.codex` | container 内の Codex 認証・設定ディレクトリ |
-| `SESSION_MIGRATION_SQLITE_PATH` | 任意 | なし | 旧 SQLite セッションを Redis に一度だけ移すときの読み取り元パス |
 | `CODEX_WORKER_COMMAND` | 任意 | `codex` | worker プロセス起動コマンド |
 | `CODEX_WORKER_ARGS` | 任意 | `app-server` | worker 起動時の引数 |
 | `CODEX_WORKER_CWD` | 任意 | `/app` | worker の作業ディレクトリ |
@@ -81,8 +79,6 @@ container 内確認:
 ```bash
 docker compose exec app sh -lc 'echo $CODEX_HOME && echo $CODEX_WORKER_CWD'
 ```
-
-既存の SQLite から移行する場合は、`.env` に `SESSION_MIGRATION_SQLITE_PATH=/data/app.sqlite` を入れて一度だけ起動します。移行後は unset に戻してください。
 
 ## timeout / hang 切り分け
 

@@ -7,7 +7,6 @@ export interface AppConfig {
   slackBotUserName: string;
   codexHome: string;
   redisUrl: string;
-  sessionMigrationSqlitePath?: string;
   slackAgentChatStatusEnabled: boolean;
   workerCommand: string;
   workerArgs: string[];
@@ -17,6 +16,10 @@ export interface AppConfig {
 }
 
 export function loadConfigFromEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
+  assertRemovedConfig(
+    env.SESSION_MIGRATION_SQLITE_PATH,
+    'SESSION_MIGRATION_SQLITE_PATH is no longer supported. This version does not migrate sqlite sessions; remove the variable and expect in-flight sessions and pending approvals to reset when upgrading.',
+  );
   const slackBotToken = readRequiredString(env.SLACK_BOT_TOKEN, 'SLACK_BOT_TOKEN');
   const slackSigningSecret = readRequiredString(
     env.SLACK_SIGNING_SECRET,
@@ -25,10 +28,6 @@ export function loadConfigFromEnv(env: NodeJS.ProcessEnv = process.env): AppConf
   const slackBotUserName = env.SLACK_BOT_USERNAME?.trim() || 'codex-agent';
   const codexHome = expandHome(env.CODEX_HOME?.trim() || join(homedir(), '.codex'));
   const redisUrl = readRequiredString(env.REDIS_URL, 'REDIS_URL');
-  const sessionMigrationSqlitePath = readOptionalString(
-    env.SESSION_MIGRATION_SQLITE_PATH,
-    'SESSION_MIGRATION_SQLITE_PATH',
-  );
   const workerCommand = env.CODEX_WORKER_COMMAND?.trim() || 'codex';
   const workerArgs = parseWorkerArgs(env.CODEX_WORKER_ARGS ?? 'app-server');
   const workerCwd = readOptionalString(env.CODEX_WORKER_CWD, 'CODEX_WORKER_CWD');
@@ -50,9 +49,6 @@ export function loadConfigFromEnv(env: NodeJS.ProcessEnv = process.env): AppConf
     slackBotUserName,
     codexHome,
     redisUrl,
-    sessionMigrationSqlitePath: sessionMigrationSqlitePath
-      ? expandHome(sessionMigrationSqlitePath)
-      : undefined,
     slackAgentChatStatusEnabled,
     workerCommand,
     workerArgs,
@@ -136,6 +132,14 @@ function parseOptionalBoolean(value: unknown, fieldName: string, defaultValue: b
   }
 
   throw new Error(`${fieldName} must be boolean when provided`);
+}
+
+function assertRemovedConfig(value: unknown, message: string): void {
+  if (value === undefined || value === null || value === '') {
+    return;
+  }
+
+  throw new Error(message);
 }
 
 function readRequiredString(value: unknown, fieldName: string): string {

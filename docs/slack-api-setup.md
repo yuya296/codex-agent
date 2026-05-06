@@ -3,26 +3,27 @@
 `codex-agent` は Slack webhook で動作します。  
 このドキュメントでは、Slack App の作成から `POST /api/webhooks/slack` に到達できる状態までを説明します。
 
-classic な DM スレッド返信を維持しつつ loading status を使う前提なので、Slack App 側では `Agents & AI Apps` は有効化しますが、`Agent or Assistant` は OFF にします。`codex-agent` 側では `SLACK_AGENT_CHAT_STATUS_ENABLED=true` を設定します。既定値は `false` で、未対応 token や通常 DM 運用ではそのまま使えます。
+会話は Chat SDK の `thread.state` に寄せ、初回 DM は `onDirectMessage`、同じ thread にぶら下がる継続投稿は `onSubscribedMessage` で処理します。SQLite の移行手順はありません。classic な DM 返信のまま loading status を使う前提なので、Slack App 側では `Agents & AI Apps` は有効化しますが、`Agent or Assistant` は OFF にします。`codex-agent` 側では `SLACK_AGENT_CHAT_STATUS_ENABLED=true` を設定します。既定値は `false` で、未対応 token や通常 DM 運用ではそのまま使えます。
 
 ## 必要な権限と設定
 
 - Bot Token Scopes: `chat:write`, `im:history`, `files:write`, `files:read`
 - `SLACK_AGENT_CHAT_STATUS_ENABLED=true` を使う場合は `assistant:write`
-- Event Subscriptions: `app_mention`, `message.im`, `assistant_thread_started`, `assistant_thread_context_changed`
-- Required features: `Event Subscriptions`, `Interactivity & Shortcuts`, `Agents & AI Apps`, `App Home` のメッセージ送信許可
+- Event Subscriptions: `message.im`, `assistant_thread_started`, `assistant_thread_context_changed`
+- Required features: `Event Subscriptions`, `Interactivity & Shortcuts`, `Agents & AI Apps`
 
 不要なもの:
 
 - `assistant:write` はこの実装では不要
 - `assistant_thread_started` と `assistant_thread_context_changed` はこの実装では不要
+- `App Home` のメッセージ送信許可はこの実装では不要
 
-## 1. Slack App を作成
+## Slack App を作成
 
 1. Slack API の管理画面で「Create New App」を選択
 2. 「From scratch」を選び、アプリ名と対象 Workspace を指定して作成
 
-## 2. Request URL を用意
+## Request URL を用意
 
 Slack から到達できる webhook URL を用意します。
 
@@ -30,7 +31,7 @@ Slack から到達できる webhook URL を用意します。
 - ローカル開発時は ngrok などで公開
 - 例: `https://xxxxx.ngrok.app/api/webhooks/slack`
 
-## 3. Agents & AI Apps を設定
+## Agents & AI Apps を設定
 
 1. Slack App 管理画面の `Agents & AI Apps` を開く
 2. `Agent or Assistant` は OFF のままにする
@@ -42,15 +43,7 @@ Slack から到達できる webhook URL を用意します。
 - `Agent or Assistant Overview` は未入力でも問題ありません
 - `Suggested Prompts` は今回の実装では不要です
 
-## 4. App Home でメッセージ送信を有効化
-
-1. `Features` > `App Home` を開く
-2. `Show Tabs` の `Messages Tab` を ON にする
-3. `Allow users to send Slash commands and messages from the messages tab` を ON にする
-
-Slack で「このアプリへのメッセージ送信はオフにされています。」と出る場合は、まずここを確認してください。
-
-## 5. Bot Token Scope を設定
+## Bot Token Scope を設定
 
 `OAuth & Permissions` の `Bot Token Scopes` に次を追加します。
 
@@ -66,7 +59,7 @@ Slack で「このアプリへのメッセージ送信はオフにされてい�
 - `assistant.threads.setStatus` は 2026年3月5日時点で `chat:write` で利用可能です。
 - パブリックチャンネル運用を追加する場合は、別途 scope とイベント購読を追加してください。
 
-## 6. Event Subscriptions を設定
+## Event Subscriptions を設定
 
 1. `Event Subscriptions` を ON
 2. `Request URL` に `https://<your-domain>/api/webhooks/slack` を設定
@@ -78,19 +71,19 @@ Slack で「このアプリへのメッセージ送信はオフにされてい�
 
 classic thread 前提では DM しか処理しませんが、Chat SDK の Slack adapter と status 対応のため上記イベントをそろえます。
 
-## 7. Interactivity を有効化
+## Interactivity を有効化
 
 `Interactivity & Shortcuts` を ON にします。  
 本アプリは Approve/Reject ボタンを使うため、Interactivity が必要です。
 
-## 8. Workspace にインストール
+## Workspace にインストール
 
 1. `Install App`（または `Reinstall to Workspace`）を実行
 2. 発行された `Bot User OAuth Token` (`xoxb-...`) を控える（`SLACK_BOT_TOKEN`）
 
 scope や event を変更した場合も、必ず `Reinstall to Workspace` を実行してください。
 
-## 9. codex-agent 側に設定
+## codex-agent 側に設定
 
 環境変数で最低限以下を設定します。
 
@@ -112,7 +105,7 @@ export SLACK_AGENT_CHAT_STATUS_ENABLED=true
 
 未対応 token や通常 DM 運用では `false` のまま使ってください。
 
-## 10. 動作確認
+## 動作確認
 
 ```bash
 npm run doctor
@@ -125,72 +118,6 @@ Slack で Bot に DM を送り、次を確認します。
 2. 同スレッド返信で継続入力として処理される
 3. 承認要求時に `Approve/Reject` ボタンが表示される
 4. `SLACK_AGENT_CHAT_STATUS_ENABLED=true` の場合、進捗中に AgentChat の loading status が表示される
-
-## Redis 移行チェックリスト
-
-Socket Mode や SQLite ベースの旧構成から、現在の webhook + Redis 構成へ切り替えるときは次の順で進めます。
-
-### 1. Slack App 設定を揃える
-
-1. `OAuth & Permissions` で次の Bot Token Scopes が入っていることを確認
-   - `chat:write`
-   - `im:history`
-   - `files:write`
-   - `files:read`
-   - `assistant:write` (`SLACK_AGENT_CHAT_STATUS_ENABLED=true` を使う場合だけ)
-2. `Event Subscriptions` を ON にして、`Request URL` を `https://<your-domain>/api/webhooks/slack` に更新
-3. `Subscribe to bot events` に次が入っていることを確認
-   - `app_mention`
-   - `message.im`
-   - `assistant_thread_started`
-   - `assistant_thread_context_changed`
-4. `Interactivity & Shortcuts` を ON にして、Request URL も同じ `/api/webhooks/slack` に合わせる
-5. `App Home` の `Messages Tab` と `Allow users to send Slash commands and messages from the messages tab` を ON にする
-6. 設定を変えたら `Reinstall to Workspace` を実行して token を更新する
-
-### 2. アプリ側の環境変数を切り替える
-
-最低限、次を webhook + Redis 構成の値にします。
-
-- `SLACK_BOT_TOKEN`
-- `SLACK_SIGNING_SECRET`
-- `REDIS_URL`
-- `SLACK_AGENT_CHAT_STATUS_ENABLED`
-- `PORT`
-
-SQLite セッションを Redis に引き継ぐ場合だけ、初回起動時に `SESSION_MIGRATION_SQLITE_PATH` を追加します。
-
-例:
-
-```bash
-export SLACK_BOT_TOKEN='xoxb-...'
-export SLACK_SIGNING_SECRET='...'
-export REDIS_URL='redis://localhost:6379'
-export SLACK_AGENT_CHAT_STATUS_ENABLED=true
-export SESSION_MIGRATION_SQLITE_PATH='./data/app.sqlite'
-```
-
-### 3. 一回だけセッションを移行する
-
-1. Redis を起動する
-2. `SESSION_MIGRATION_SQLITE_PATH` を設定した状態で `npm start` または `docker compose up -d --build` を実行する
-3. 起動ログに `migrated N sessions from sqlite` が出ることを確認する
-4. 移行が終わったら `SESSION_MIGRATION_SQLITE_PATH` を unset する
-
-この変数を残したままでも既存 Redis データは上書きしませんが、恒常設定にはしないほうが安全です。
-
-### 4. Slack から疎通確認する
-
-1. Bot に新規 DM を送って新しい session が始まること
-2. 同じ thread 返信が継続入力として扱われること
-3. 承認待ちで `Approve/Reject` が出ること
-4. `SLACK_AGENT_CHAT_STATUS_ENABLED=true` のときだけ loading status が出ること
-
-### 5. 切替後に戻すもの
-
-- `SESSION_MIGRATION_SQLITE_PATH` を削除
-- 古い Socket Mode 用の app token / env が残っていれば削除
-- 旧 SQLite ファイルを参照する運用メモや deploy 設定が残っていれば削除
 
 ## トラブルシュート
 

@@ -4,8 +4,8 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { loadConfigFromEnv } from '../../../src/config/index.js';
 
-test('config loading uses explicit environment values and expands home paths when variables are provided', () => {
-  const loaded = loadConfigFromEnv({
+test('config loading rejects the removed sqlite migration env with a clear message', () => {
+  assert.throws(() => loadConfigFromEnv({
     SLACK_BOT_TOKEN: 'xoxb-test',
     SLACK_SIGNING_SECRET: 'signing-secret',
     REDIS_URL: 'redis://localhost:6379',
@@ -18,19 +18,7 @@ test('config loading uses explicit environment values and expands home paths whe
     WORKER_STREAM_EVENT_TIMEOUT_MS: '600000',
     SLACK_AGENT_CHAT_STATUS_ENABLED: 'true',
     PORT: '3000',
-  });
-
-  assert.equal(loaded.slackBotToken, 'xoxb-test');
-  assert.equal(loaded.slackSigningSecret, 'signing-secret');
-  assert.equal(loaded.slackBotUserName, 'codex-agent-dev');
-  assert.equal(loaded.codexHome, join(homedir(), '.codex'));
-  assert.equal(loaded.redisUrl, 'redis://localhost:6379');
-  assert.equal(loaded.sessionMigrationSqlitePath, join(homedir(), 'data', 'app.sqlite'));
-  assert.deepEqual(loaded.workerArgs, ['app-server', '--listen', 'stdio://']);
-  assert.equal(loaded.workerCwd, join(homedir(), 'workspace'));
-  assert.equal(loaded.workerStreamEventTimeoutMs, 600000);
-  assert.equal(loaded.slackAgentChatStatusEnabled, true);
-  assert.equal(loaded.port, 3000);
+  }), /SESSION_MIGRATION_SQLITE_PATH is no longer supported/);
 });
 
 test('config loading falls back to defaults when optional values are omitted', () => {

@@ -13,21 +13,16 @@
 
 - `gateway`
   - 外部チャネルとの境界
-  - `channel adapter + presentation` として捉える
-- `orchestrator`
-  - session / conversation の進行管理
-  - session state と persistence の owner
+  - Chat SDK thread と Slack presentation をまとめて扱う
 - `worker`
   - `codex app-server` と対話する内部境界
-
-`repository` は独立したトップレベルではなく、`orchestrator` の内部詳細として扱う。
 
 ## Core principles
 
 - 1 Slack root thread = 1 Session
 - 1 Session = 1 Codex thread
 - Session の会話本体や approval 状態の source of truth は `codex app-server`
-- SQLite には最小限の対応関係と session state のみを保持する
+- `thread.state` には `codexThreadId` と `pendingApprovalId` だけを保持する
 - 失敗後も同じ Slack thread から再開できることを優先する
 
 ## Documentation policy
