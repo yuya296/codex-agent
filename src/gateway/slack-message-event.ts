@@ -30,11 +30,9 @@ export interface RawSlackMessageEvent {
 }
 
 const execFileAsync = promisify(execFile);
-const DOWNLOADABLE_IMAGE_MIME_PREFIX = 'image/';
-const MAX_DOWNLOADABLE_SLACK_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_ATTACHMENT_PREVIEW_CHARS = 6000;
 const MAX_TEXT_ATTACHMENT_BYTES = 64 * 1024;
-const DOWNLOADABLE_TEXT_MIME_TYPES = new Set([
+const PREVIEWABLE_TEXT_MIME_TYPES = new Set([
   'application/json',
   'application/pdf',
   'application/xml',
@@ -65,6 +63,7 @@ export function toSlackMessageEvent(event: RawSlackMessageEvent): SlackMessageEv
 export async function buildSlackMessageEvent(
   event: RawSlackMessageEvent,
   botToken: string,
+  maxBytes: number,
   fallback?: { team_id?: string },
 ): Promise<SlackMessageEvent | null> {
   const baseEvent = toSlackMessageEvent({
@@ -80,7 +79,7 @@ export async function buildSlackMessageEvent(
   }
 
   try {
-    const downloaded = await downloadSlackFiles(event.files, botToken);
+    const downloaded = await downloadSlackFiles(event.files, botToken, maxBytes);
     return {
       ...baseEvent,
       text: appendDownloadedFilesToText(baseEvent.text, downloaded.files),
@@ -123,6 +122,7 @@ export function appendDownloadedFilesToText(
 async function downloadSlackFiles(
   files: RawSlackMessageEvent['files'],
   botToken: string,
+  maxBytes: number,
 ): Promise<{
   directory?: string;
   files: Array<{ path: string; name?: string; mimetype?: string; preview?: string }>;
@@ -137,7 +137,7 @@ async function downloadSlackFiles(
   const warnings: string[] = [];
 
   for (const file of files) {
-    const rejectionReason = rejectSlackFileDownload(file);
+    const rejectionReason = rejectSlackFileDownload(file, maxBytes);
     if (rejectionReason) {
       warnings.push(formatSlackAttachmentWarning(file, rejectionReason));
       continue;
@@ -193,28 +193,15 @@ function shouldDownloadSlackAttachments(event: SlackMessageEvent): boolean {
   return event.channel_type === 'im' && (!event.subtype || event.subtype === 'file_share');
 }
 
-function rejectSlackFileDownload(file: NonNullable<RawSlackMessageEvent['files']>[number]): string | undefined {
-  if (typeof file.size === 'number' && file.size > MAX_DOWNLOADABLE_SLACK_FILE_BYTES) {
-    return `サイズ上限 ${formatBytes(MAX_DOWNLOADABLE_SLACK_FILE_BYTES)} を超えています (${formatBytes(file.size)})。`;
-  }
-
-  if (!isDownloadableSlackFile(file)) {
-    return `未対応の MIME type です (${file.mimetype ?? 'unknown'})。`;
+function rejectSlackFileDownload(
+  file: NonNullable<RawSlackMessageEvent['files']>[number],
+  maxBytes: number,
+): string | undefined {
+  if (typeof file.size === 'number' && file.size > maxBytes) {
+    return `サイズ上限 ${formatBytes(maxBytes)} を超えています (${formatBytes(file.size)})。`;
   }
 
   return undefined;
-}
-
-function isDownloadableSlackFile(file: NonNullable<RawSlackMessageEvent['files']>[number]): boolean {
-  if (typeof file.mimetype !== 'string') {
-    return false;
-  }
-
-  return (
-    file.mimetype.startsWith(DOWNLOADABLE_IMAGE_MIME_PREFIX) ||
-    file.mimetype.startsWith('text/') ||
-    DOWNLOADABLE_TEXT_MIME_TYPES.has(file.mimetype)
-  );
 }
 
 function formatSlackAttachmentWarning(
@@ -236,7 +223,7 @@ async function extractSlackFilePreview(path: string, mimetype?: string): Promise
 
     if (
       (typeof mimetype === 'string' && mimetype.startsWith('text/')) ||
-      (mimetype && DOWNLOADABLE_TEXT_MIME_TYPES.has(mimetype) && mimetype !== 'application/pdf')
+      (mimetype && PREVIEWABLE_TEXT_MIME_TYPES.has(mimetype))
     ) {
       const buffer = await readFile(path);
       return normalizeAttachmentPreview(buffer.subarray(0, MAX_TEXT_ATTACHMENT_BYTES).toString('utf8'));

@@ -63,6 +63,7 @@ async function main(): Promise<void> {
     appToken: config.slackAppToken,
     botUserName: config.slackBotUserName,
     state,
+    slackAttachmentMaxBytes: config.slackAttachmentMaxBytes,
   });
 
   // This release intentionally drops sqlite session migration support.

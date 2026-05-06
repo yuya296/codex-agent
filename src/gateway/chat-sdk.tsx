@@ -3,7 +3,7 @@
 import { createSlackAdapter, type SlackAdapter } from '@chat-adapter/slack';
 import { Chat, type StateAdapter } from 'chat';
 import { buildResolvedApprovalCard } from './gateway-cards.js';
-import type { Gateway, GatewayApprovalAction, SlackMessageEvent } from './gateway.js';
+import type { Gateway, GatewayApprovalAction } from './gateway.js';
 import type { ThreadSessionState } from '../domain/types.js';
 import { buildSlackMessageEvent, type RawSlackMessageEvent } from './slack-message-event.js';
 
@@ -19,6 +19,7 @@ interface ChatGatewayRuntimeConfig {
   appToken: string;
   botUserName: string;
   state: StateAdapter;
+  slackAttachmentMaxBytes: number;
 }
 
 type ApprovalActionPayload = {
@@ -45,7 +46,11 @@ export function createChatGatewayRuntime(
   });
 
   bot.onDirectMessage(async (thread, message) => {
-    const slackEvent = await toSlackGatewayEvent(message.raw as RawSlackMessageEvent, config.botToken);
+    const slackEvent = await buildSlackMessageEvent(
+      message.raw as RawSlackMessageEvent,
+      config.botToken,
+      config.slackAttachmentMaxBytes,
+    );
     if (!slackEvent) {
       return;
     }
@@ -55,7 +60,11 @@ export function createChatGatewayRuntime(
   });
 
   bot.onSubscribedMessage(async (thread, message) => {
-    const slackEvent = await toSlackGatewayEvent(message.raw as RawSlackMessageEvent, config.botToken);
+    const slackEvent = await buildSlackMessageEvent(
+      message.raw as RawSlackMessageEvent,
+      config.botToken,
+      config.slackAttachmentMaxBytes,
+    );
     if (!slackEvent) {
       return;
     }
@@ -105,11 +114,4 @@ export function createChatGatewayRuntime(
       await bot.shutdown();
     },
   };
-}
-
-async function toSlackGatewayEvent(
-  rawEvent: RawSlackMessageEvent,
-  botToken: string,
-): Promise<SlackMessageEvent | null> {
-  return buildSlackMessageEvent(rawEvent, botToken);
 }

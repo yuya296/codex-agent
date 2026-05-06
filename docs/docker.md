@@ -70,6 +70,7 @@ remote は `deploy/env/server.env.example` を `/etc/codex-agent/app.env` にコ
 | `SLACK_APP_TOKEN` | 必須 | なし | Slack Socket Mode 接続に使う App-Level Token (`xapp-...`) |
 | `SLACK_BOT_USERNAME` | 任意 | `codex-agent` | Chat SDK の mention 判定に使う bot 名 |
 | `SLACK_AGENT_CHAT_STATUS_ENABLED` | 任意 | `false` | `assistant.threads.setStatus` を使うときに `true` にする |
+| `SLACK_ATTACHMENT_MAX_BYTES` | 任意 | `10485760` | Slack 添付の download を許容する最大サイズ (byte)。超過すると thread に warning |
 | `DEBUG_SLACK_EVENTS` | 任意 | `false` | Slack event / client 呼び出しをログ出力する |
 | `DEBUG_WORKER_EVENTS` | 任意 | `false` | worker の主要イベントをログ出力する |
 | `DEBUG_WORKER_EVENT_DELTAS` | 任意 | `false` | 高頻度な delta イベントも追加でログ出力する |

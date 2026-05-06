@@ -7,6 +7,8 @@ import {
   toSlackMessageEvent,
 } from '../../../src/gateway/slack-message-event.js';
 
+const DEFAULT_MAX_BYTES = 10 * 1024 * 1024;
+
 test('Slack message event mapping turns threaded DM payloads into internal message events', () => {
   assert.deepEqual(
     toSlackMessageEvent({
@@ -103,7 +105,7 @@ test('Slack message event mapping can fill team_id from the outer event envelope
     text: 'hello',
     ts: '100.2',
     channel_type: 'im',
-  }, 'xoxb-test', { team_id: 'T1' });
+  }, 'xoxb-test', DEFAULT_MAX_BYTES, { team_id: 'T1' });
 
   assert.deepEqual(event, {
     team_id: 'T1',
@@ -178,7 +180,7 @@ test('Slack message event mapping downloads PDF and text attachments to the temp
           url_private_download: 'https://files.example/notes.txt',
         },
       ],
-    }, 'xoxb-test');
+    }, 'xoxb-test', DEFAULT_MAX_BYTES);
 
     assert.equal(event?.text.includes('添付ファイル:'), true);
     assert.equal(event?.text.includes('spec.pdf'), true);
@@ -216,7 +218,7 @@ test('Slack message event mapping does not download attachments for non-DM event
           url_private_download: 'https://files.example/spec.pdf',
         },
       ],
-    }, 'xoxb-test');
+    }, 'xoxb-test', DEFAULT_MAX_BYTES);
 
     assert.equal(fetchCalls, 0);
     assert.equal(event?.temporary_directory, undefined);
@@ -260,7 +262,7 @@ test('Slack message event mapping stores same-name attachments under unique path
           url_private_download: 'https://files.example/2',
         },
       ],
-    }, 'xoxb-test');
+    }, 'xoxb-test', DEFAULT_MAX_BYTES);
 
     assert.match(event?.text ?? '', /same-F1\.txt/u);
     assert.match(event?.text ?? '', /same-F2\.txt/u);
@@ -297,7 +299,7 @@ test('Slack message event mapping includes text file previews when downloadable 
           url_private_download: 'https://files.example/notes.txt',
         },
       ],
-    }, 'xoxb-test');
+    }, 'xoxb-test', DEFAULT_MAX_BYTES);
 
     assert.match(event?.text ?? '', /添付ファイル内容:/u);
     assert.match(event?.text ?? '', /申請期限は4月1日です。/u);
@@ -307,7 +309,49 @@ test('Slack message event mapping includes text file previews when downloadable 
   }
 });
 
-test('Slack message event mapping returns attachment warnings for unsupported and oversized files', async () => {
+test('Slack message event mapping downloads files with non-previewable MIME types without warnings', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    return new Response('zip-bytes', {
+      status: 200,
+      headers: {
+        'content-type': 'application/zip',
+      },
+    });
+  }) as typeof fetch;
+
+  try {
+    const event = await buildSlackMessageEvent({
+      team: 'T1',
+      channel: 'D1',
+      user: 'U1',
+      text: '',
+      ts: '100.2',
+      channel_type: 'im',
+      files: [
+        {
+          id: 'F1',
+          name: 'archive.zip',
+          mimetype: 'application/zip',
+          size: 1024,
+          url_private_download: 'https://files.example/archive.zip',
+        },
+      ],
+    }, 'xoxb-test', DEFAULT_MAX_BYTES);
+
+    assert.equal(event?.attachment_warnings, undefined);
+    assert.equal(event?.downloaded_files_count, 1);
+    assert.match(event?.text ?? '', /添付ファイル:/u);
+    assert.match(event?.text ?? '', /archive\.zip/u);
+    assert.equal(/添付ファイル内容:/u.test(event?.text ?? ''), false);
+    assert.ok(event?.temporary_directory);
+    await rm(event?.temporary_directory ?? '', { recursive: true, force: true });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('Slack message event mapping warns when an attached file exceeds the size limit', async () => {
   const event = await buildSlackMessageEvent({
     team: 'T1',
     channel: 'D1',
@@ -318,29 +362,45 @@ test('Slack message event mapping returns attachment warnings for unsupported an
     files: [
       {
         id: 'F1',
-        name: 'archive.zip',
-        mimetype: 'application/zip',
-        size: 1024,
-        url_private_download: 'https://files.example/archive.zip',
-      },
-      {
-        id: 'F2',
         name: 'big.pdf',
         mimetype: 'application/pdf',
         size: 11 * 1024 * 1024,
         url_private_download: 'https://files.example/big.pdf',
       },
     ],
-  }, 'xoxb-test');
+  }, 'xoxb-test', DEFAULT_MAX_BYTES);
 
   assert.equal(event?.text, '');
   assert.equal(event?.downloaded_files_count, 0);
   assert.equal(event?.temporary_directory, undefined);
-  assert.equal(event?.attachment_warnings?.length, 2);
-  assert.match(event?.attachment_warnings?.[0] ?? '', /archive\.zip/u);
-  assert.match(event?.attachment_warnings?.[0] ?? '', /未対応/u);
-  assert.match(event?.attachment_warnings?.[1] ?? '', /big\.pdf/u);
-  assert.match(event?.attachment_warnings?.[1] ?? '', /サイズ上限/u);
+  assert.equal(event?.attachment_warnings?.length, 1);
+  assert.match(event?.attachment_warnings?.[0] ?? '', /big\.pdf/u);
+  assert.match(event?.attachment_warnings?.[0] ?? '', /サイズ上限/u);
+});
+
+test('Slack message event mapping warns when a file exceeds a smaller configured maxBytes', async () => {
+  const event = await buildSlackMessageEvent({
+    team: 'T1',
+    channel: 'D1',
+    user: 'U1',
+    text: '',
+    ts: '100.2',
+    channel_type: 'im',
+    files: [
+      {
+        id: 'F1',
+        name: 'medium.pdf',
+        mimetype: 'application/pdf',
+        size: 2 * 1024 * 1024,
+        url_private_download: 'https://files.example/medium.pdf',
+      },
+    ],
+  }, 'xoxb-test', 1 * 1024 * 1024);
+
+  assert.equal(event?.downloaded_files_count, 0);
+  assert.equal(event?.attachment_warnings?.length, 1);
+  assert.match(event?.attachment_warnings?.[0] ?? '', /medium\.pdf/u);
+  assert.match(event?.attachment_warnings?.[0] ?? '', /サイズ上限/u);
 });
 
 test('Slack message event mapping continues when one attached file download fails', async () => {
@@ -381,7 +441,7 @@ test('Slack message event mapping continues when one attached file download fail
           url_private_download: 'https://files.example/good.png',
         },
       ],
-    }, 'xoxb-test');
+    }, 'xoxb-test', DEFAULT_MAX_BYTES);
 
     assert.equal(event?.text.includes('good.png'), true);
     assert.equal(event?.text.includes('bad.png'), false);

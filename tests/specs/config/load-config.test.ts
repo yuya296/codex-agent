@@ -35,6 +35,31 @@ test('config loading falls back to defaults when optional values are omitted', (
   assert.equal(loaded.redisUrl, 'redis://localhost:6379');
   assert.equal(loaded.workerStreamEventTimeoutMs, 300000);
   assert.equal(loaded.slackAgentChatStatusEnabled, false);
+  assert.equal(loaded.slackAttachmentMaxBytes, 10 * 1024 * 1024);
+});
+
+test('config loading honours a custom Slack attachment size limit', () => {
+  const loaded = loadConfigFromEnv({
+    SLACK_BOT_TOKEN: 'xoxb-test',
+    SLACK_APP_TOKEN: 'xapp-test',
+    REDIS_URL: 'redis://localhost:6379',
+    SLACK_ATTACHMENT_MAX_BYTES: '1048576',
+  });
+
+  assert.equal(loaded.slackAttachmentMaxBytes, 1048576);
+});
+
+test('config loading rejects invalid Slack attachment size limits', () => {
+  assert.throws(
+    () =>
+      loadConfigFromEnv({
+        SLACK_BOT_TOKEN: 'xoxb-test',
+        SLACK_APP_TOKEN: 'xapp-test',
+        REDIS_URL: 'redis://localhost:6379',
+        SLACK_ATTACHMENT_MAX_BYTES: '0',
+      }),
+    /SLACK_ATTACHMENT_MAX_BYTES must be a positive integer when provided/,
+  );
 });
 
 test('config loading requires a Slack app token', () => {

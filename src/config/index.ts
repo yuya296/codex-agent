@@ -12,6 +12,7 @@ export interface AppConfig {
   workerArgs: string[];
   workerCwd?: string;
   workerStreamEventTimeoutMs: number;
+  slackAttachmentMaxBytes: number;
 }
 
 export function loadConfigFromEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -32,6 +33,11 @@ export function loadConfigFromEnv(env: NodeJS.ProcessEnv = process.env): AppConf
     'WORKER_STREAM_EVENT_TIMEOUT_MS',
     5 * 60 * 1000,
   );
+  const slackAttachmentMaxBytes = parsePositiveInteger(
+    env.SLACK_ATTACHMENT_MAX_BYTES,
+    'SLACK_ATTACHMENT_MAX_BYTES',
+    10 * 1024 * 1024,
+  );
   const slackAgentChatStatusEnabled = parseOptionalBoolean(
     env.SLACK_AGENT_CHAT_STATUS_ENABLED,
     'SLACK_AGENT_CHAT_STATUS_ENABLED',
@@ -49,6 +55,7 @@ export function loadConfigFromEnv(env: NodeJS.ProcessEnv = process.env): AppConf
     workerArgs,
     workerCwd: workerCwd ? expandHome(workerCwd) : undefined,
     workerStreamEventTimeoutMs,
+    slackAttachmentMaxBytes,
   };
 }
 

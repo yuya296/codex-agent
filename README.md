@@ -40,6 +40,7 @@ export REDIS_URL='redis://localhost:6379'
 - `CODEX_WORKER_CWD`
 - `WORKER_STREAM_EVENT_TIMEOUT_MS`
 - `SLACK_AGENT_CHAT_STATUS_ENABLED`
+- `SLACK_ATTACHMENT_MAX_BYTES`
 - `DEBUG_SLACK_EVENTS`
 - `DEBUG_WORKER_EVENTS`
 - `DEBUG_WORKER_EVENT_DELTAS`
@@ -53,6 +54,7 @@ export REDIS_URL='redis://localhost:6379'
 - `REDIS_URL`: 必須
 - `WORKER_STREAM_EVENT_TIMEOUT_MS`: `300000`
 - `SLACK_AGENT_CHAT_STATUS_ENABLED`: `false`
+- `SLACK_ATTACHMENT_MAX_BYTES`: `10485760`
 
 ## Docs
 
@@ -179,6 +181,7 @@ CODEX_WORKER_ARGS="app-server"
 CODEX_WORKER_CWD=/app
 WORKER_STREAM_EVENT_TIMEOUT_MS=300000
 SLACK_AGENT_CHAT_STATUS_ENABLED=false
+SLACK_ATTACHMENT_MAX_BYTES=10485760
 ```
 
 remote 用テンプレートは `deploy/env/server.env.example` を使います。`HOST_STATE_ROOT` は remote 専用 compose 変数で、既定値は `/srv/codex-agent` です。
@@ -189,7 +192,7 @@ DM の流れは、初回投稿を `onDirectMessage`、その後の継続投稿�
 
 Chat SDK の Slack Socket Mode を使います。public webhook URL は不要で、`SLACK_APP_TOKEN` を使って Slack へ WebSocket 接続します。
 
-通常回答の completed メッセージは、送信直前に Markdown を Slack 向けテキストへ整形します。箇条書きは `* `、番号付きリストは `1. ` の行構造を保つようにしています。ローカル画像パス（`/tmp/...png` など）が含まれる場合は、本文から取り除いたうえで thread にファイル添付します。Slack で受け取った添付ファイルは bot token の `files:read` で download し、対応形式の画像・PDF・テキスト系ファイルは一時ファイルのパスを worker に渡します。テキスト系と PDF は内容プレビューも worker 入力へ埋め込みます。未対応 MIME type やサイズ上限超過は thread に warning を返し、turn 後に一時ディレクトリを cleanup します。approval と status は今回の変換対象外です。
+通常回答の completed メッセージは、送信直前に Markdown を Slack 向けテキストへ整形します。箇条書きは `* `、番号付きリストは `1. ` の行構造を保つようにしています。ローカル画像パス（`/tmp/...png` など）が含まれる場合は、本文から取り除いたうえで thread にファイル添付します。Slack で受け取った添付ファイルは bot token の `files:read` で download し、一時ファイルのパスを worker に渡します。画像・PDF・テキスト系のうち PDF とテキスト系は内容プレビューも worker 入力へ埋め込みます。プレビュー対象外の MIME (zip, docx, バイナリなど) もパスは worker に渡され、codex 側のツールで読み込めます。サイズ上限超過 (`SLACK_ATTACHMENT_MAX_BYTES`、既定 10 MiB) は thread に warning を返し、turn 後に一時ディレクトリを cleanup します。approval と status は今回の変換対象外です。
 
 DM では管理コマンドも使えます。Slack の slash command ではなく通常メッセージとして送ります。先頭の空白は任意です。
 
