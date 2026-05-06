@@ -134,6 +134,7 @@ function formatStatus(context: AdminCommandContext, codexVersion: string): strin
     `- Worker cwd: ${context.workerCwd ?? process.cwd()}`,
     `- CODEX_HOME: ${context.codexHome}`,
     `- Redis: ${context.redisUrl}`,
+    '- Slack connection: socket',
     `- Agent chat status: ${context.slackAgentChatStatusEnabled ? 'enabled' : 'disabled'}`,
     `- Uptime: ${Math.floor(context.processUptimeSeconds)}s`,
   ].join('\n');

@@ -1,9 +1,7 @@
 /** @jsxImportSource chat */
 
-import { serve, type ServerType } from '@hono/node-server';
 import { createSlackAdapter, type SlackAdapter } from '@chat-adapter/slack';
 import { Chat, type StateAdapter } from 'chat';
-import { Hono } from 'hono';
 import { buildResolvedApprovalCard } from './gateway-cards.js';
 import type { Gateway, GatewayApprovalAction, SlackMessageEvent } from './gateway.js';
 import type { ThreadSessionState } from '../domain/types.js';
@@ -12,13 +10,13 @@ import { buildSlackMessageEvent, type RawSlackMessageEvent } from './slack-messa
 export interface ChatGatewayRuntime {
   bot: Chat<{ slack: SlackAdapter }, ThreadSessionState>;
   slackAdapter: SlackAdapter;
-  start(port?: number): Promise<void>;
+  start(): Promise<void>;
   stop(): Promise<void>;
 }
 
 interface ChatGatewayRuntimeConfig {
   botToken: string;
-  signingSecret: string;
+  appToken: string;
   botUserName: string;
   state: StateAdapter;
 }
@@ -33,8 +31,9 @@ export function createChatGatewayRuntime(
   config: ChatGatewayRuntimeConfig,
 ): ChatGatewayRuntime {
   const slackAdapter = createSlackAdapter({
+    mode: 'socket',
+    appToken: config.appToken,
     botToken: config.botToken,
-    signingSecret: config.signingSecret,
   });
 
   const bot = new Chat<{ slack: SlackAdapter }, ThreadSessionState>({
@@ -96,26 +95,13 @@ export function createChatGatewayRuntime(
     }
   });
 
-  const app = new Hono();
-  app.post('/api/webhooks/slack', async (c) => bot.webhooks.slack(c.req.raw, {
-    waitUntil: (task) => c.executionCtx.waitUntil(task),
-  }));
-
-  let server: ServerType | null = null;
-
   return {
     bot,
     slackAdapter,
-    start: async (port?: number) => {
+    start: async () => {
       await bot.initialize();
-      server = serve({
-        fetch: app.fetch,
-        port,
-      });
     },
     stop: async () => {
-      server?.close();
-      server = null;
       await bot.shutdown();
     },
   };

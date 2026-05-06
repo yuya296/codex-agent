@@ -7,7 +7,7 @@ services:
     ipc: host
     environment:
       SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:?SLACK_BOT_TOKEN is required}
-      SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:?SLACK_SIGNING_SECRET is required}
+      SLACK_APP_TOKEN: ${SLACK_APP_TOKEN:?SLACK_APP_TOKEN is required}
       SLACK_BOT_USERNAME: ${SLACK_BOT_USERNAME:-codex-agent}
       SLACK_AGENT_CHAT_STATUS_ENABLED: ${SLACK_AGENT_CHAT_STATUS_ENABLED:-false}
       DEBUG_SLACK_EVENTS: ${DEBUG_SLACK_EVENTS:-false}
@@ -20,13 +20,10 @@ services:
       CODEX_WORKER_CWD: ${CODEX_WORKER_CWD:-/app}
       WORKER_STREAM_EVENT_TIMEOUT_MS: ${WORKER_STREAM_EVENT_TIMEOUT_MS:-300000}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
-      PORT: ${PORT:-3000}
       PLAYWRIGHT_AGENT_PROFILE_DIR: ${PLAYWRIGHT_AGENT_PROFILE_DIR:-/profiles/agent}
       PLAYWRIGHT_MCP_CONFIG: ${PLAYWRIGHT_MCP_CONFIG:-/run/playwright/cli.config.json}
     depends_on:
       - redis
-    ports:
-      - "${PORT:-3000}:${PORT:-3000}"
     volumes:
       - ./.docker/codex-home:/root/.codex
       - ./.docker/data:/data

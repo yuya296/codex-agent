@@ -3,7 +3,7 @@ import { join } from 'node:path';
 
 export interface AppConfig {
   slackBotToken: string;
-  slackSigningSecret: string;
+  slackAppToken: string;
   slackBotUserName: string;
   codexHome: string;
   redisUrl: string;
@@ -12,7 +12,6 @@ export interface AppConfig {
   workerArgs: string[];
   workerCwd?: string;
   workerStreamEventTimeoutMs: number;
-  port?: number;
 }
 
 export function loadConfigFromEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -21,10 +20,7 @@ export function loadConfigFromEnv(env: NodeJS.ProcessEnv = process.env): AppConf
     'SESSION_MIGRATION_SQLITE_PATH is no longer supported. This version does not migrate sqlite sessions; remove the variable and expect in-flight sessions and pending approvals to reset when upgrading.',
   );
   const slackBotToken = readRequiredString(env.SLACK_BOT_TOKEN, 'SLACK_BOT_TOKEN');
-  const slackSigningSecret = readRequiredString(
-    env.SLACK_SIGNING_SECRET,
-    'SLACK_SIGNING_SECRET',
-  );
+  const slackAppToken = readRequiredString(env.SLACK_APP_TOKEN, 'SLACK_APP_TOKEN');
   const slackBotUserName = env.SLACK_BOT_USERNAME?.trim() || 'codex-agent';
   const codexHome = expandHome(env.CODEX_HOME?.trim() || join(homedir(), '.codex'));
   const redisUrl = readRequiredString(env.REDIS_URL, 'REDIS_URL');
@@ -41,11 +37,10 @@ export function loadConfigFromEnv(env: NodeJS.ProcessEnv = process.env): AppConf
     'SLACK_AGENT_CHAT_STATUS_ENABLED',
     false,
   );
-  const port = parsePort(env.PORT);
 
   return {
     slackBotToken,
-    slackSigningSecret,
+    slackAppToken,
     slackBotUserName,
     codexHome,
     redisUrl,
@@ -54,7 +49,6 @@ export function loadConfigFromEnv(env: NodeJS.ProcessEnv = process.env): AppConf
     workerArgs,
     workerCwd: workerCwd ? expandHome(workerCwd) : undefined,
     workerStreamEventTimeoutMs,
-    port,
   };
 }
 
@@ -85,19 +79,6 @@ export function expandHome(input: string): string {
   }
 
   return input;
-}
-
-function parsePort(value: unknown): number | undefined {
-  if (value === undefined || value === null || value === '') {
-    return undefined;
-  }
-
-  const asNumber = typeof value === 'number' ? value : Number(value);
-  if (!Number.isInteger(asNumber) || asNumber <= 0) {
-    throw new Error('PORT must be a positive integer when provided');
-  }
-
-  return asNumber;
 }
 
 function parsePositiveInteger(value: unknown, fieldName: string, defaultValue: number): number {

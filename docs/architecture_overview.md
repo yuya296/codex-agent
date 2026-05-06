@@ -34,7 +34,7 @@ flowchart LR
     Codex3["codex app-server"]
   end
 
-  Slack <-->|webhook / dm thread| Gateway
+  Slack <-->|socket mode / dm thread| Gateway
   Worker1 <--> Codex1
   Worker2 <--> Codex2
   Worker3 <--> Codex3

@@ -7,7 +7,7 @@ import { loadConfigFromEnv } from '../../../src/config/index.js';
 test('config loading rejects the removed sqlite migration env with a clear message', () => {
   assert.throws(() => loadConfigFromEnv({
     SLACK_BOT_TOKEN: 'xoxb-test',
-    SLACK_SIGNING_SECRET: 'signing-secret',
+    SLACK_APP_TOKEN: 'xapp-test',
     REDIS_URL: 'redis://localhost:6379',
     SLACK_BOT_USERNAME: 'codex-agent-dev',
     CODEX_HOME: '~/.codex',
@@ -17,17 +17,17 @@ test('config loading rejects the removed sqlite migration env with a clear messa
     CODEX_WORKER_CWD: '~/workspace',
     WORKER_STREAM_EVENT_TIMEOUT_MS: '600000',
     SLACK_AGENT_CHAT_STATUS_ENABLED: 'true',
-    PORT: '3000',
   }), /SESSION_MIGRATION_SQLITE_PATH is no longer supported/);
 });
 
 test('config loading falls back to defaults when optional values are omitted', () => {
   const loaded = loadConfigFromEnv({
     SLACK_BOT_TOKEN: 'xoxb-test',
-    SLACK_SIGNING_SECRET: 'signing-secret',
+    SLACK_APP_TOKEN: 'xapp-test',
     REDIS_URL: 'redis://localhost:6379',
   });
 
+  assert.equal(loaded.slackAppToken, 'xapp-test');
   assert.equal(loaded.codexHome, join(homedir(), '.codex'));
   assert.equal(loaded.slackBotUserName, 'codex-agent');
   assert.equal(loaded.workerCommand, 'codex');
@@ -35,6 +35,17 @@ test('config loading falls back to defaults when optional values are omitted', (
   assert.equal(loaded.redisUrl, 'redis://localhost:6379');
   assert.equal(loaded.workerStreamEventTimeoutMs, 300000);
   assert.equal(loaded.slackAgentChatStatusEnabled, false);
+});
+
+test('config loading requires a Slack app token', () => {
+  assert.throws(
+    () =>
+      loadConfigFromEnv({
+        SLACK_BOT_TOKEN: 'xoxb-test',
+        REDIS_URL: 'redis://localhost:6379',
+      }),
+    /SLACK_APP_TOKEN is required/,
+  );
 });
 
 test('config loading fails with a helpful message when required variables are missing', () => {
@@ -46,7 +57,7 @@ test('config loading rejects invalid boolean values when parsing environment var
     () =>
       loadConfigFromEnv({
         SLACK_BOT_TOKEN: 'xoxb-test',
-        SLACK_SIGNING_SECRET: 'signing-secret',
+        SLACK_APP_TOKEN: 'xapp-test',
         REDIS_URL: 'redis://localhost:6379',
         SLACK_AGENT_CHAT_STATUS_ENABLED: 'yes',
       }),

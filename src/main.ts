@@ -60,7 +60,7 @@ async function main(): Promise<void> {
 
   const runtime = createChatGatewayRuntime(gateway, {
     botToken: config.slackBotToken,
-    signingSecret: config.slackSigningSecret,
+    appToken: config.slackAppToken,
     botUserName: config.slackBotUserName,
     state,
   });
@@ -69,7 +69,7 @@ async function main(): Promise<void> {
   console.warn(
     '[startup-warning] in-flight sessions and pending approvals from the old sqlite-backed session model are not migrated; the first upgrade to this build resets them.',
   );
-  await runtime.start(config.port);
+  await runtime.start();
   // eslint-disable-next-line no-console
   console.log('codex-agent started');
 
