@@ -25,11 +25,10 @@ prune_dangling_skill_symlinks() {
 
 mkdir -p "${CODEX_HOME:-/root/.codex}"
 mkdir -p "${PLAYWRIGHT_AGENT_PROFILE_DIR:-/profiles/agent}"
-mkdir -p "$(dirname "${SQLITE_PATH:-/data/app.sqlite}")"
-mkdir -p /run/playwright
+mkdir -p "$(dirname "${PLAYWRIGHT_MCP_CONFIG:-/run/playwright/cli.config.json}")"
 
 require_env SLACK_BOT_TOKEN
-require_env SLACK_SIGNING_SECRET
+require_env SLACK_APP_TOKEN
 require_env REDIS_URL
 
 prune_dangling_skill_symlinks
