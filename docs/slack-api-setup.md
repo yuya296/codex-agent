@@ -44,7 +44,7 @@
 - `chat:write`（Bot がスレッド返信し、AgentChat status 更新にも使う）
 - `im:history`（DM の `message.im` イベントを購読するため）
 - `files:write`（ローカル画像を thread に添付アップロードするため）
-- `files:read`（Slack で受け取った画像添付を download して worker に渡すため）
+- `files:read`（Slack で受け取った画像・PDF・テキスト系添付を download して worker に渡すため）
 - `assistant:write`（`SLACK_AGENT_CHAT_STATUS_ENABLED=true` のときだけ）
 
 補足:

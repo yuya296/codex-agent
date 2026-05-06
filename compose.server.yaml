@@ -1,0 +1,7 @@
+services:
+  app:
+    restart: unless-stopped
+    volumes:
+      - ${HOST_STATE_ROOT:-/srv/codex-agent}/codex-home:/root/.codex
+      - ${HOST_STATE_ROOT:-/srv/codex-agent}/playwright-agent-profile:/profiles/agent
+      - ${HOST_STATE_ROOT:-/srv/codex-agent}/data:/data

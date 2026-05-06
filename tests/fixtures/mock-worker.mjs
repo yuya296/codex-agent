@@ -236,6 +236,88 @@ rl.on('line', (line) => {
         return;
       }
 
+      if (text.includes('[ELICIT_APPROVAL]')) {
+        const requestId = request('mcpServer/elicitation/request', {
+          threadId,
+          turnId,
+          elicitationId: `elicitation-${turnCount}`,
+          message: 'Allow Linear MCP Server to run tool "linear mcp server_save_project"?',
+          requestedSchema: {
+            type: 'object',
+            properties: {
+              allow: {
+                type: 'boolean',
+                title: 'Allow',
+              },
+            },
+            required: ['allow'],
+          },
+        });
+        pendingApprovalRequests.set(requestId, {
+          threadId,
+          turnId,
+          approvalId: `elicitation-${turnCount}`,
+          kind: 'elicitation',
+        });
+        return;
+      }
+
+      if (text.includes('[ELICIT_COMPLEX]')) {
+        request('mcpServer/elicitation/request', {
+          threadId,
+          turnId,
+          elicitationId: `elicitation-${turnCount}`,
+          message: 'Project name is required.',
+          requestedSchema: {
+            type: 'object',
+            properties: {
+              projectName: {
+                type: 'string',
+                title: 'Project Name',
+              },
+            },
+            required: ['projectName'],
+          },
+        });
+        return;
+      }
+
+      if (text.includes('[ELICIT_URL]')) {
+        request('mcpServer/elicitation/request', {
+          threadId,
+          turnId,
+          elicitationId: `elicitation-url-${turnCount}`,
+          mode: 'url',
+          message: 'Open the browser flow to continue.',
+          url: 'https://example.com/oauth',
+        });
+        return;
+      }
+
+      if (text.includes('[ELICIT_MULTI_BOOLEAN]')) {
+        request('mcpServer/elicitation/request', {
+          threadId,
+          turnId,
+          elicitationId: `elicitation-multi-${turnCount}`,
+          message: 'Choose approval options.',
+          requestedSchema: {
+            type: 'object',
+            properties: {
+              allow: {
+                type: 'boolean',
+                title: 'Allow',
+              },
+              remember: {
+                type: 'boolean',
+                title: 'Remember',
+              },
+            },
+            required: ['allow'],
+          },
+        });
+        return;
+      }
+
       if (text.includes('[STALL]')) {
         emitAgentMessage(threadId, turnId, `processing:${text}`, 'commentary');
         return;
@@ -287,7 +369,9 @@ rl.on('line', (line) => {
 
     pendingApprovalRequests.delete(msg.id);
 
-    const decision = msg?.result?.decision;
+    const decision = pending.kind === 'elicitation'
+      ? msg?.result?.action
+      : msg?.result?.decision;
     const label = normalizeDecisionLabel(decision);
 
     emitAgentMessage(pending.threadId, pending.turnId, `approval:${label}`, 'commentary');

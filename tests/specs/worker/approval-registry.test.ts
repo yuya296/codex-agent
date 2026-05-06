@@ -10,6 +10,7 @@ test('approval registry returns an approval once and removes it from the registr
     method: 'execCommandApproval',
     threadId: 'thread-1',
     turnId: 'turn-1',
+    params: {},
   });
 
   assert.deepEqual(registry.consume('approval-1'), {
@@ -17,6 +18,7 @@ test('approval registry returns an approval once and removes it from the registr
     method: 'execCommandApproval',
     threadId: 'thread-1',
     turnId: 'turn-1',
+    params: {},
   });
   assert.equal(registry.consume('approval-1'), null);
 });

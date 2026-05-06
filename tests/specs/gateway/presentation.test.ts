@@ -277,6 +277,52 @@ test('gateway controller cleans up temporary files after handling the event', as
   assert.equal(existsSync(tempPath), false);
 });
 
+test('gateway routing posts attachment warnings and skips worker execution when no actionable input remains', async () => {
+  const worker = new MockWorkerClient();
+  const thread = new MockGatewayThread();
+  const gateway = new Gateway(worker);
+
+  await gateway.handleMessage(thread as any, {
+    team_id: 'T1',
+    channel_id: 'D1',
+    user_id: 'U1',
+    text: '',
+    ts: '100.1',
+    channel_type: 'im',
+    attachment_warnings: ['- archive.zip: 未対応の MIME type です (application/zip)。'],
+    downloaded_files_count: 0,
+  });
+
+  assert.deepEqual(worker.callLog, []);
+  assert.equal(thread.postCalls.length, 1);
+  assert.match(String(thread.postCalls[0]), /worker に渡していません/u);
+  assert.match(String(thread.postCalls[0]), /archive\.zip/u);
+});
+
+test('gateway routing posts attachment warnings and still continues when supported files were downloaded', async () => {
+  const worker = new MockWorkerClient();
+  worker.createThreadImpl = async () => ({ codex_thread_id: 'codex-42' });
+  worker.sendUserMessageImpl = async () => [];
+  const thread = new MockGatewayThread();
+
+  const gateway = new Gateway(worker);
+
+  await gateway.handleMessage(thread as any, {
+    team_id: 'T1',
+    channel_id: 'D1',
+    user_id: 'U1',
+    text: ['本文', '', '添付ファイル:', '- spec.pdf: /tmp/spec.pdf'].join('\n'),
+    ts: '100.1',
+    channel_type: 'im',
+    attachment_warnings: ['- archive.zip: 未対応の MIME type です (application/zip)。'],
+    downloaded_files_count: 1,
+  });
+
+  assert.deepEqual(worker.callLog, ['createThread', 'sendUserMessage']);
+  assert.equal(thread.postCalls.length, 1);
+  assert.match(String(thread.postCalls[0]), /archive\.zip/u);
+});
+
 function createDirectMessage(text: string): SlackMessageEvent {
   return {
     team_id: 'T1',

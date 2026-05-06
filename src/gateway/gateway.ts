@@ -23,6 +23,8 @@ export interface SlackMessageEvent {
   };
   channel_type: 'im' | 'channel' | 'group' | 'mpim';
   subtype?: string;
+  attachment_warnings?: string[];
+  downloaded_files_count?: number;
   temporary_directory?: string;
 }
 
@@ -38,6 +40,8 @@ export interface GatewayApprovalAction {
   prompt?: string;
   decision: ApprovalDecision;
 }
+
+const SLACK_APPROVAL_PROMPT_BLOCK_LIMIT = 3000;
 
 type WorkerFlowResult =
   | { ok: true }
@@ -57,6 +61,19 @@ export class Gateway {
   public async handleMessage(thread: GatewayThread, event: SlackMessageEvent): Promise<void> {
     try {
       if (event.channel_type !== 'im' || (event.subtype && event.subtype !== 'file_share')) {
+        return;
+      }
+
+      if (event.attachment_warnings && event.attachment_warnings.length > 0) {
+        await thread.post(
+          [
+            ':warning: 次の添付ファイルは worker に渡していません。',
+            ...event.attachment_warnings,
+          ].join('\n'),
+        );
+      }
+
+      if (!event.text.trim() && !event.downloaded_files_count && event.attachment_warnings?.length) {
         return;
       }
 
@@ -180,7 +197,8 @@ export class Gateway {
   }
 
   public async notifyApproval(thread: GatewayThread, approval: ApprovalRequest): Promise<void> {
-    await thread.post(buildApprovalCard(approval.prompt, JSON.stringify(approval)));
+    const displayPrompt = toSlackApprovalPrompt(approval.prompt);
+    await thread.post(buildApprovalCard(displayPrompt, JSON.stringify(approval)));
   }
 
   public async notifyCompleted(thread: GatewayThread, message: string): Promise<void> {
@@ -314,6 +332,15 @@ export class Gateway {
     await thread.setState(state, { replace: true });
   }
 }
+
+export function toSlackApprovalPrompt(prompt: string): string {
+  if (prompt.length <= SLACK_APPROVAL_PROMPT_BLOCK_LIMIT) {
+    return prompt;
+  }
+
+  return `${prompt.slice(0, SLACK_APPROVAL_PROMPT_BLOCK_LIMIT - 1).trimEnd()}…`;
+}
+
 
 export {
   extractLocalImageFiles,

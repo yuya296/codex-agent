@@ -148,10 +148,20 @@ export class WorkerProtocolAdapter {
     );
   }
 
+  public supportsApprovalStyleElicitation(event: StreamEvent): boolean {
+    if (event.method !== METHODS.elicitationRequest) {
+      return false;
+    }
+
+    return this.readApprovalBooleanElicitationKey(event.params) !== null;
+  }
+
   public resolveApprovalId(event: StreamEvent): string {
     return (
       this.asString(event.params.approvalId)
       ?? this.asString(event.params.approval_id)
+      ?? this.asString(event.params.elicitationId)
+      ?? this.asString(event.params.elicitation_id)
       ?? this.asString(event.params.itemId)
       ?? this.asString(event.params.item_id)
       ?? `request-${String(event.id ?? '')}`
@@ -159,6 +169,10 @@ export class WorkerProtocolAdapter {
   }
 
   public buildApprovalPrompt(event: StreamEvent): string {
+    if (event.method === METHODS.elicitationRequest) {
+      return this.buildElicitationPrompt(event.params);
+    }
+
     const reason = this.asString(event.params.reason);
     const command = this.readCommand(event.params.command);
 
@@ -177,7 +191,11 @@ export class WorkerProtocolAdapter {
     return 'Approval required to continue.';
   }
 
-  public buildApprovalResponse(method: string, decision: ApprovalDecision): Record<string, unknown> {
+  public buildApprovalResponse(
+    method: string,
+    decision: ApprovalDecision,
+    params: Record<string, unknown> = {},
+  ): Record<string, unknown> {
     const approve = decision === 'approve';
 
     if (method === METHODS.commandApprovalRequest || method === METHODS.fileChangeApprovalRequest) {
@@ -190,6 +208,10 @@ export class WorkerProtocolAdapter {
       return {
         decision: approve ? 'approved' : 'denied',
       };
+    }
+
+    if (method === METHODS.elicitationRequest) {
+      return this.buildElicitationResponse(decision, params);
     }
 
     throw new Error(`unsupported approval method: ${method}`);
@@ -327,6 +349,74 @@ export class WorkerProtocolAdapter {
 
   private formatCommandCodeBlock(command: string): string {
     return `\`\`\`\n${command}\n\`\`\``;
+  }
+
+  private buildElicitationPrompt(params: Record<string, unknown>): string {
+    const message = this.asString(params.message) ?? 'User confirmation is required to continue.';
+    const mode = this.asString(params.mode);
+    const url = this.asString(params.url);
+
+    if (mode === 'url' && url) {
+      return `${message}\n${url}`;
+    }
+
+    return message;
+  }
+
+  private buildElicitationResponse(
+    decision: ApprovalDecision,
+    params: Record<string, unknown>,
+  ): Record<string, unknown> {
+    if (decision === 'reject') {
+      return { action: 'decline' };
+    }
+
+    const approvalKey = this.readApprovalBooleanElicitationKey(params);
+    if (!approvalKey) {
+      throw new Error('unsupported elicitation approval response');
+    }
+
+    return {
+      action: 'accept',
+      content: {
+        [approvalKey]: true,
+      },
+    };
+  }
+
+  private readApprovalBooleanElicitationKey(params: Record<string, unknown>): string | null {
+    if (this.asString(params.mode) === 'url') {
+      return null;
+    }
+
+    const requestedSchema = this.asRecord(params.requestedSchema);
+    const properties = this.asRecord(requestedSchema.properties);
+    const entries = Object.entries(properties);
+    if (entries.length !== 1) {
+      return null;
+    }
+
+    const entry = entries[0];
+    if (!entry) {
+      return null;
+    }
+
+    const [key, definition] = entry;
+    const definitionRecord = this.asRecord(definition);
+    if (this.asString(definitionRecord.type) !== 'boolean') {
+      return null;
+    }
+
+    if ('default' in definitionRecord) {
+      return null;
+    }
+
+    const required = requestedSchema.required;
+    if (!Array.isArray(required) || required.length !== 1 || required[0] !== key) {
+      return null;
+    }
+
+    return key;
   }
 
   private readCommand(value: unknown): string | null {

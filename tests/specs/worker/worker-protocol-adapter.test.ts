@@ -35,3 +35,67 @@ test('worker protocol adapter extracts completed final answers from item/complet
 
   assert.deepEqual(message, { text: 'final', phase: 'final_answer' });
 });
+
+test('worker protocol adapter converts approval-style elicitation decisions into MCP elicitation results', () => {
+  const adapter = createAdapter();
+
+  const result = adapter.buildApprovalResponse(
+    'mcpServer/elicitation/request',
+    'approve',
+    {
+      requestedSchema: {
+        type: 'object',
+        properties: {
+          allow: {
+            type: 'boolean',
+          },
+        },
+        required: ['allow'],
+      },
+    },
+  );
+
+  assert.deepEqual(result, {
+    action: 'accept',
+    content: {
+      allow: true,
+    },
+  });
+});
+
+test('worker protocol adapter does not treat url-mode elicitation as approval-style', () => {
+  const adapter = createAdapter();
+
+  const supported = adapter.supportsApprovalStyleElicitation({
+    kind: 'request',
+    method: 'mcpServer/elicitation/request',
+    params: {
+      mode: 'url',
+      message: 'Open browser',
+      url: 'https://example.com/oauth',
+    },
+  });
+
+  assert.equal(supported, false);
+});
+
+test('worker protocol adapter does not treat multi-boolean elicitation as approval-style', () => {
+  const adapter = createAdapter();
+
+  const supported = adapter.supportsApprovalStyleElicitation({
+    kind: 'request',
+    method: 'mcpServer/elicitation/request',
+    params: {
+      requestedSchema: {
+        type: 'object',
+        properties: {
+          allow: { type: 'boolean' },
+          remember: { type: 'boolean' },
+        },
+        required: ['allow'],
+      },
+    },
+  });
+
+  assert.equal(supported, false);
+});
