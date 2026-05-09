@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, extname, join } from 'node:path';
 import { promisify } from 'node:util';
@@ -60,15 +60,20 @@ export function toSlackMessageEvent(event: RawSlackMessageEvent): SlackMessageEv
   };
 }
 
+export interface BuildSlackMessageEventOptions {
+  fallback?: { team_id?: string };
+  tmpDir?: string;
+}
+
 export async function buildSlackMessageEvent(
   event: RawSlackMessageEvent,
   botToken: string,
   maxBytes: number,
-  fallback?: { team_id?: string },
+  options: BuildSlackMessageEventOptions = {},
 ): Promise<SlackMessageEvent | null> {
   const baseEvent = toSlackMessageEvent({
     ...event,
-    team_id: event.team_id ?? event.team ?? fallback?.team_id,
+    team_id: event.team_id ?? event.team ?? options.fallback?.team_id,
   });
   if (!baseEvent) {
     return null;
@@ -79,7 +84,7 @@ export async function buildSlackMessageEvent(
   }
 
   try {
-    const downloaded = await downloadSlackFiles(event.files, botToken, maxBytes);
+    const downloaded = await downloadSlackFiles(event.files, botToken, maxBytes, options.tmpDir);
     return {
       ...baseEvent,
       text: appendDownloadedFilesToText(baseEvent.text, downloaded.files),
@@ -123,6 +128,7 @@ async function downloadSlackFiles(
   files: RawSlackMessageEvent['files'],
   botToken: string,
   maxBytes: number,
+  tmpDir?: string,
 ): Promise<{
   directory?: string;
   files: Array<{ path: string; name?: string; mimetype?: string; preview?: string }>;
@@ -132,6 +138,7 @@ async function downloadSlackFiles(
     return { files: [], warnings: [] };
   }
 
+  const baseDir = tmpDir ?? tmpdir();
   let directory: string | undefined;
   const downloaded: Array<{ path: string; name?: string; mimetype?: string; preview?: string }> = [];
   const warnings: string[] = [];
@@ -150,7 +157,12 @@ async function downloadSlackFiles(
         continue;
       }
 
-      directory ??= await mkdtemp(join(tmpdir(), 'codex-agent-slack-files-'));
+      if (directory === undefined) {
+        if (tmpDir) {
+          await mkdir(tmpDir, { recursive: true });
+        }
+        directory = await mkdtemp(join(baseDir, 'codex-agent-slack-files-'));
+      }
       const response = await fetch(sourceUrl, {
         headers: {
           Authorization: `Bearer ${botToken}`,
@@ -295,10 +307,10 @@ function mimeTypeToExtension(mimetype?: string): string {
 
 function formatBytes(value: number): string {
   if (value < 1024 * 1024) {
-    return `${Math.round(value / 102.4) / 10} KB`;
+    return `${(value / 1024).toFixed(1)} KB`;
   }
 
-  return `${Math.round((value / (1024 * 1024)) * 10) / 10} MB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function logSlackAttachmentPreviewError(path: string, mimetype: string | undefined, error: unknown): void {

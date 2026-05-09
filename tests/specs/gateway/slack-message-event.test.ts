@@ -105,7 +105,7 @@ test('Slack message event mapping can fill team_id from the outer event envelope
     text: 'hello',
     ts: '100.2',
     channel_type: 'im',
-  }, 'xoxb-test', DEFAULT_MAX_BYTES, { team_id: 'T1' });
+  }, 'xoxb-test', DEFAULT_MAX_BYTES, { fallback: { team_id: 'T1' } });
 
   assert.deepEqual(event, {
     team_id: 'T1',

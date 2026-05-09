@@ -64,12 +64,9 @@ async function main(): Promise<void> {
     botUserName: config.slackBotUserName,
     state,
     slackAttachmentMaxBytes: config.slackAttachmentMaxBytes,
+    slackAttachmentTmpDir: config.slackAttachmentTmpDir,
   });
 
-  // This release intentionally drops sqlite session migration support.
-  console.warn(
-    '[startup-warning] in-flight sessions and pending approvals from the old sqlite-backed session model are not migrated; the first upgrade to this build resets them.',
-  );
   await runtime.start();
   // eslint-disable-next-line no-console
   console.log('codex-agent started');

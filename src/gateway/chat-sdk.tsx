@@ -3,9 +3,15 @@
 import { createSlackAdapter, type SlackAdapter } from '@chat-adapter/slack';
 import { Chat, type StateAdapter } from 'chat';
 import { buildResolvedApprovalCard } from './gateway-cards.js';
-import type { Gateway, GatewayApprovalAction } from './gateway.js';
+import type { Gateway, GatewayApprovalAction, GatewayThread } from './gateway.js';
 import type { ThreadSessionState } from '../domain/types.js';
 import { buildSlackMessageEvent, type RawSlackMessageEvent } from './slack-message-event.js';
+
+// Chat SDK の thread 型 (state が Promise を許容するなど) と Gateway 側で扱う
+// GatewayThread の差分を吸収する。共通の as 経由にすることでキャストを 1 箇所にまとめる。
+function asGatewayThread(thread: unknown): GatewayThread {
+  return thread as GatewayThread;
+}
 
 export interface ChatGatewayRuntime {
   bot: Chat<{ slack: SlackAdapter }, ThreadSessionState>;
@@ -20,6 +26,7 @@ interface ChatGatewayRuntimeConfig {
   botUserName: string;
   state: StateAdapter;
   slackAttachmentMaxBytes: number;
+  slackAttachmentTmpDir?: string;
 }
 
 type ApprovalActionPayload = {
@@ -50,13 +57,14 @@ export function createChatGatewayRuntime(
       message.raw as RawSlackMessageEvent,
       config.botToken,
       config.slackAttachmentMaxBytes,
+      { tmpDir: config.slackAttachmentTmpDir },
     );
     if (!slackEvent) {
       return;
     }
 
     await thread.subscribe();
-    await gateway.handleMessage(thread as any, slackEvent);
+    await gateway.handleMessage(asGatewayThread(thread), slackEvent);
   });
 
   bot.onSubscribedMessage(async (thread, message) => {
@@ -64,12 +72,13 @@ export function createChatGatewayRuntime(
       message.raw as RawSlackMessageEvent,
       config.botToken,
       config.slackAttachmentMaxBytes,
+      { tmpDir: config.slackAttachmentTmpDir },
     );
     if (!slackEvent) {
       return;
     }
 
-    await gateway.handleMessage(thread as any, slackEvent);
+    await gateway.handleMessage(asGatewayThread(thread), slackEvent);
   });
 
   bot.onAction(['approve', 'reject'], async (event) => {
@@ -86,7 +95,7 @@ export function createChatGatewayRuntime(
         decision,
       };
 
-      const approved = await gateway.handleApprovalAction(event.thread as any, action);
+      const approved = await gateway.handleApprovalAction(asGatewayThread(event.thread), action);
       if (!approved) {
         return;
       }
@@ -99,7 +108,17 @@ export function createChatGatewayRuntime(
           decision === 'approve' ? 'Approve' : 'Reject'
         }`,
       });
-    } catch {
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error(
+        '[gateway:approval-action-error]',
+        JSON.stringify({
+          error: String(error),
+          action_id: event.actionId,
+          thread_id: event.threadId,
+          message_id: event.messageId,
+        }),
+      );
       return;
     }
   });
