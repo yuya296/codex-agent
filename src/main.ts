@@ -1,16 +1,15 @@
+import { createRedisState } from '@chat-adapter/state-redis';
 import {
   createAdminCommandHandler,
   getCodexVersion,
   getLatestCodexVersion,
   runAdminDoctor,
 } from './admin/commands.js';
-import { createBoltGatewayRuntime, createSlackPublisher } from './gateway/bolt.js';
-import { Gateway } from './gateway/gateway.js';
-import { Orchestrator } from './orchestrator/orchestrator.js';
-import { SessionRepository } from './repository/session-repository.js';
 import { loadConfigFromEnv } from './config/index.js';
-import { StdioJsonRpcWorkerClient } from './worker/stdio-jsonrpc-worker-client.js';
+import { createChatGatewayRuntime } from './gateway/chat-sdk.js';
+import { Gateway } from './gateway/gateway.js';
 import { RestartableWorkerClient } from './worker/restartable-worker-client.js';
+import { StdioJsonRpcWorkerClient } from './worker/stdio-jsonrpc-worker-client.js';
 
 const debugWorkerEvents = process.env.DEBUG_WORKER_EVENTS === 'true';
 const debugWorkerEventDeltas = process.env.DEBUG_WORKER_EVENT_DELTAS === 'true';
@@ -19,7 +18,11 @@ async function main(): Promise<void> {
   const config = loadConfigFromEnv();
   process.env.CODEX_HOME = config.codexHome;
 
-  const repository = new SessionRepository(config.sqlitePath);
+  const state = createRedisState({
+    keyPrefix: 'codex-agent',
+    url: config.redisUrl,
+  });
+
   const workerClient = new RestartableWorkerClient(
     () => new StdioJsonRpcWorkerClient(
       config.workerCommand,
@@ -33,19 +36,11 @@ async function main(): Promise<void> {
     ),
   );
 
-  let gateway!: Gateway;
-  const orchestrator = new Orchestrator(repository, workerClient, {
-    notifyProgress: async (session, message) => gateway.notifyProgress(session, message),
-    notifyApproval: async (session, approval) => gateway.notifyApproval(session, approval),
-    notifyCompleted: async (session, message) => gateway.notifyCompleted(session, message),
-    notifyFailed: async (session, message) => gateway.notifyFailed(session, message),
-  });
-
   const adminCommands = createAdminCommandHandler({
     getStatusContext: async () => ({
       processUptimeSeconds: process.uptime(),
       codexHome: config.codexHome,
-      sqlitePath: config.sqlitePath,
+      redisUrl: config.redisUrl,
       workerCommand: config.workerCommand,
       workerArgs: config.workerArgs,
       workerCwd: config.workerCwd,
@@ -59,28 +54,29 @@ async function main(): Promise<void> {
     runDoctor: async () => runAdminDoctor(config.workerCwd ?? process.cwd()),
   });
 
-  let runtime!: ReturnType<typeof createBoltGatewayRuntime>;
-  const publisher = createSlackPublisher(
-    () => runtime.app,
-    { slackAgentChatStatusEnabled: config.slackAgentChatStatusEnabled },
-  );
+  const gateway = new Gateway(workerClient, adminCommands, {
+    slackAgentChatStatusEnabled: config.slackAgentChatStatusEnabled,
+  });
 
-  runtime = createBoltGatewayRuntime(
-    (gateway = new Gateway(orchestrator, publisher, adminCommands)),
-    {
-      botToken: config.slackBotToken,
-      appToken: config.slackAppToken,
-    },
-  );
+  const runtime = createChatGatewayRuntime(gateway, {
+    botToken: config.slackBotToken,
+    appToken: config.slackAppToken,
+    botUserName: config.slackBotUserName,
+    state,
+    slackAttachmentMaxBytes: config.slackAttachmentMaxBytes,
+  });
 
-  await runtime.start(config.port);
+  // This release intentionally drops sqlite session migration support.
+  console.warn(
+    '[startup-warning] in-flight sessions and pending approvals from the old sqlite-backed session model are not migrated; the first upgrade to this build resets them.',
+  );
+  await runtime.start();
   // eslint-disable-next-line no-console
   console.log('codex-agent started');
 
   const shutdown = async () => {
     await runtime.stop();
     await workerClient.close();
-    repository.close();
     process.exit(0);
   };
 

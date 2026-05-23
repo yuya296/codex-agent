@@ -29,7 +29,6 @@ remote は `-f compose.yaml -f compose.server.yaml` を明示します。
 
 - Codex 認証: `./.docker/codex-home`
 - Playwright agent profile: `./.docker/playwright-agent-profile`
-- SQLite: `./.docker/data/app.sqlite`
 - project local rules/skills: `/app/AGENTS.md`, `/app/.codex/skills`
 - Docker 用 `CODEX_HOME` defaults: `docker/codex-home-defaults/`
 
@@ -41,7 +40,6 @@ remote は `-f compose.yaml -f compose.server.yaml` を明示します。
 - 永続データ root: `/srv/codex-agent`
 - Codex 認証: `/srv/codex-agent/codex-home`
 - Playwright agent profile: `/srv/codex-agent/playwright-agent-profile`
-- SQLite: `/srv/codex-agent/data/app.sqlite`
 
 remote 側の bind mount root は `HOST_STATE_ROOT` で上書きできます。既定値は `/srv/codex-agent` です。
 
@@ -69,8 +67,10 @@ remote は `deploy/env/server.env.example` を `/etc/codex-agent/app.env` にコ
 | `APP_IMAGE` | 任意 | `codex-agent:local` | compose が使う image 名。local build tag や remote pull 元を切り替える |
 | `HOST_STATE_ROOT` | remote のみ | `/srv/codex-agent` | remote 側 bind mount の root |
 | `SLACK_BOT_TOKEN` | 必須 | なし | Slack Bot Token。メッセージ送信、DM 受信、ファイル操作に使う |
-| `SLACK_APP_TOKEN` | 必須 | なし | Slack App-Level Token。Socket Mode 接続に使う |
+| `SLACK_APP_TOKEN` | 必須 | なし | Slack Socket Mode 接続に使う App-Level Token (`xapp-...`) |
+| `SLACK_BOT_USERNAME` | 任意 | `codex-agent` | Chat SDK の mention 判定に使う bot 名 |
 | `SLACK_AGENT_CHAT_STATUS_ENABLED` | 任意 | `false` | `assistant.threads.setStatus` を使うときに `true` にする |
+| `SLACK_ATTACHMENT_MAX_BYTES` | 任意 | `10485760` | Slack 添付の download を許容する最大サイズ (byte)。超過すると thread に warning |
 | `DEBUG_SLACK_EVENTS` | 任意 | `false` | Slack event / client 呼び出しをログ出力する |
 | `DEBUG_WORKER_EVENTS` | 任意 | `false` | worker の主要イベントをログ出力する |
 | `DEBUG_WORKER_EVENT_DELTAS` | 任意 | `false` | 高頻度な delta イベントも追加でログ出力する |
@@ -79,8 +79,7 @@ remote は `deploy/env/server.env.example` を `/etc/codex-agent/app.env` にコ
 | `CODEX_WORKER_ARGS` | 任意 | `app-server` | worker 起動時の引数 |
 | `CODEX_WORKER_CWD` | 任意 | `/app` | worker の作業ディレクトリ |
 | `WORKER_STREAM_EVENT_TIMEOUT_MS` | 任意 | `300000` | worker turn 内で無通信を許容する最大時間(ms) |
-| `SQLITE_PATH` | 任意 | `/data/app.sqlite` | SQLite ファイルの保存先 |
-| `PORT` | 任意 | なし | 必要な場合のみ app の待受ポートを明示する |
+| `REDIS_URL` | 必須 | `redis://redis:6379` | Chat SDK の thread subscription/state backend |
 | `PLAYWRIGHT_AGENT_PROFILE_DIR` | 任意 | `/profiles/agent` | Playwright 用ブラウザ profile の保存先 |
 | `PLAYWRIGHT_MCP_CONFIG` | 任意 | `/run/playwright/cli.config.json` | Playwright MCP の設定ファイルパス |
 
@@ -90,7 +89,7 @@ remote は `deploy/env/server.env.example` を `/etc/codex-agent/app.env` にコ
 docker compose up -d --build
 ```
 
-ソースコードを変えたら、app 本体へ反映するには再 build が必要です。
+ソースコードを変えたら、app 本体へ反映するには再 build が必要です。既定の Socket Mode では host port を公開しないため、Slack の Request URL は不要です。
 
 ログ確認:
 

@@ -1,0 +1,29 @@
+display_information:
+  name: codex-agent
+  description: Codex agent powered by Chat SDK Socket Mode gateway
+
+features:
+  bot_user:
+    display_name: codex-agent
+    always_online: true
+
+oauth_config:
+  scopes:
+    bot:
+      - assistant:write
+      - chat:write
+      - files:read
+      - files:write
+      - im:history
+
+settings:
+  event_subscriptions:
+    bot_events:
+      - message.im
+      - assistant_thread_started
+      - assistant_thread_context_changed
+  interactivity:
+    is_enabled: true
+  org_deploy_enabled: false
+  socket_mode_enabled: true
+  token_rotation_enabled: false

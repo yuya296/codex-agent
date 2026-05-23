@@ -30,8 +30,6 @@ export async function runDoctorChecks(cwd = process.cwd()): Promise<CheckResult[
   results.push(checkNpmInstall(cwd));
   results.push(checkCodexBinary());
   results.push(checkCodexAppServer());
-  results.push(await checkNodeSqlite());
-  results.push(checkSqliteCli());
 
   return results;
 }
@@ -135,45 +133,6 @@ function checkCodexAppServer(): CheckResult {
     label: 'codex app-server support',
     status: 'ok',
     detail: 'app-server subcommand is available.',
-  };
-}
-
-async function checkNodeSqlite(): Promise<CheckResult> {
-  try {
-    await import('node:sqlite');
-    return {
-      id: 'node-sqlite',
-      label: 'Node SQLite runtime',
-      status: 'ok',
-      detail: 'node:sqlite module loaded successfully.',
-    };
-  } catch {
-    return {
-      id: 'node-sqlite',
-      label: 'Node SQLite runtime',
-      status: 'fail',
-      detail: 'Unable to load node:sqlite. Check your Node.js version.',
-    };
-  }
-}
-
-function checkSqliteCli(): CheckResult {
-  const command = runCommand('sqlite3', ['--version']);
-
-  if (!command.ok) {
-    return {
-      id: 'sqlite-cli',
-      label: 'sqlite3 CLI',
-      status: 'warn',
-      detail: 'sqlite3 command not found (optional for this app).',
-    };
-  }
-
-  return {
-    id: 'sqlite-cli',
-    label: 'sqlite3 CLI',
-    status: 'ok',
-    detail: `version: ${firstLine(command.stdout) ?? 'unknown'}`,
   };
 }
 

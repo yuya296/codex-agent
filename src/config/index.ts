@@ -4,20 +4,27 @@ import { join } from 'node:path';
 export interface AppConfig {
   slackBotToken: string;
   slackAppToken: string;
+  slackBotUserName: string;
   codexHome: string;
-  sqlitePath: string;
+  redisUrl: string;
   slackAgentChatStatusEnabled: boolean;
   workerCommand: string;
   workerArgs: string[];
   workerCwd?: string;
   workerStreamEventTimeoutMs: number;
-  port?: number;
+  slackAttachmentMaxBytes: number;
 }
 
 export function loadConfigFromEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
+  assertRemovedConfig(
+    env.SESSION_MIGRATION_SQLITE_PATH,
+    'SESSION_MIGRATION_SQLITE_PATH is no longer supported. This version does not migrate sqlite sessions; remove the variable and expect in-flight sessions and pending approvals to reset when upgrading.',
+  );
   const slackBotToken = readRequiredString(env.SLACK_BOT_TOKEN, 'SLACK_BOT_TOKEN');
   const slackAppToken = readRequiredString(env.SLACK_APP_TOKEN, 'SLACK_APP_TOKEN');
+  const slackBotUserName = env.SLACK_BOT_USERNAME?.trim() || 'codex-agent';
   const codexHome = expandHome(env.CODEX_HOME?.trim() || join(homedir(), '.codex'));
+  const redisUrl = readRequiredString(env.REDIS_URL, 'REDIS_URL');
   const workerCommand = env.CODEX_WORKER_COMMAND?.trim() || 'codex';
   const workerArgs = parseWorkerArgs(env.CODEX_WORKER_ARGS ?? 'app-server');
   const workerCwd = readOptionalString(env.CODEX_WORKER_CWD, 'CODEX_WORKER_CWD');
@@ -26,25 +33,29 @@ export function loadConfigFromEnv(env: NodeJS.ProcessEnv = process.env): AppConf
     'WORKER_STREAM_EVENT_TIMEOUT_MS',
     5 * 60 * 1000,
   );
-  const sqlitePath = expandHome(env.SQLITE_PATH?.trim() || './data/app.sqlite');
+  const slackAttachmentMaxBytes = parsePositiveInteger(
+    env.SLACK_ATTACHMENT_MAX_BYTES,
+    'SLACK_ATTACHMENT_MAX_BYTES',
+    10 * 1024 * 1024,
+  );
   const slackAgentChatStatusEnabled = parseOptionalBoolean(
     env.SLACK_AGENT_CHAT_STATUS_ENABLED,
     'SLACK_AGENT_CHAT_STATUS_ENABLED',
     false,
   );
-  const port = parsePort(env.PORT);
 
   return {
     slackBotToken,
     slackAppToken,
+    slackBotUserName,
     codexHome,
-    sqlitePath,
+    redisUrl,
     slackAgentChatStatusEnabled,
     workerCommand,
     workerArgs,
     workerCwd: workerCwd ? expandHome(workerCwd) : undefined,
     workerStreamEventTimeoutMs,
-    port,
+    slackAttachmentMaxBytes,
   };
 }
 
@@ -75,19 +86,6 @@ export function expandHome(input: string): string {
   }
 
   return input;
-}
-
-function parsePort(value: unknown): number | undefined {
-  if (value === undefined || value === null || value === '') {
-    return undefined;
-  }
-
-  const asNumber = typeof value === 'number' ? value : Number(value);
-  if (!Number.isInteger(asNumber) || asNumber <= 0) {
-    throw new Error('PORT must be a positive integer when provided');
-  }
-
-  return asNumber;
 }
 
 function parsePositiveInteger(value: unknown, fieldName: string, defaultValue: number): number {
@@ -122,6 +120,14 @@ function parseOptionalBoolean(value: unknown, fieldName: string, defaultValue: b
   }
 
   throw new Error(`${fieldName} must be boolean when provided`);
+}
+
+function assertRemovedConfig(value: unknown, message: string): void {
+  if (value === undefined || value === null || value === '') {
+    return;
+  }
+
+  throw new Error(message);
 }
 
 function readRequiredString(value: unknown, fieldName: string): string {

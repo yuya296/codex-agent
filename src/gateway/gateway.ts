@@ -1,40 +1,14 @@
-import { rm } from 'node:fs/promises';
-import type {
-  ApprovalDecision,
-  ContinueSessionInput,
-  ResolveApprovalInput,
-  Session,
-  StartSessionInput,
-} from '../domain/types.js';
-import type { Orchestrator, GatewayNotifier } from '../orchestrator/orchestrator.js';
-import { parseAdminCommand, type AdminCommandHandler } from '../admin/commands.js';
+import { rm, readFile } from 'node:fs/promises';
+import { basename } from 'node:path';
+import type { AdminCommandHandler } from '../admin/commands.js';
+import { parseAdminCommand } from '../admin/commands.js';
+import type { ApprovalDecision, ApprovalRequest, ThreadSessionState } from '../domain/types.js';
+import type { WorkerClient, WorkerRunEvent } from '../worker/types.js';
+import { buildApprovalCard } from './gateway-cards.js';
 import {
   renderSlackCompletedMessage,
   toSlackLoadingMessage,
 } from './gateway-renderer.js';
-
-export interface SlackPublisher {
-  postThreadMessage(input: {
-    channel_id: string;
-    root_thread_ts: string;
-    text: string;
-    blocks?: unknown[];
-  }): Promise<void>;
-  uploadThreadFiles(input: {
-    channel_id: string;
-    root_thread_ts: string;
-    files: Array<{
-      path: string;
-      alt_text?: string;
-    }>;
-  }): Promise<void>;
-  setThreadStatus(input: {
-    channel_id: string;
-    root_thread_ts: string;
-    status: string;
-    loading_messages?: string[];
-  }): Promise<void>;
-}
 
 export interface SlackMessageEvent {
   team_id: string;
@@ -54,10 +28,14 @@ export interface SlackMessageEvent {
   temporary_directory?: string;
 }
 
-export interface SlackApprovalAction {
-  team_id: string;
-  channel_id: string;
-  root_thread_ts: string;
+export interface GatewayThread {
+  state: ThreadSessionState | Promise<ThreadSessionState | null> | null;
+  post(input: unknown): Promise<void>;
+  startTyping(status?: string): Promise<void>;
+  setState(state: ThreadSessionState, options?: { replace?: boolean }): Promise<void>;
+}
+
+export interface GatewayApprovalAction {
   approval_id: string;
   prompt?: string;
   decision: ApprovalDecision;
@@ -65,41 +43,34 @@ export interface SlackApprovalAction {
 
 const SLACK_APPROVAL_PROMPT_BLOCK_LIMIT = 3000;
 
-export class Gateway implements GatewayNotifier {
-  private readonly pendingAttachmentDirectories = new Map<string, string>();
+type WorkerFlowResult =
+  | { ok: true }
+  | { ok: false; error: string };
 
+interface GatewayOptions {
+  slackAgentChatStatusEnabled?: boolean;
+}
+
+export class Gateway {
   public constructor(
-    private readonly orchestrator: Orchestrator,
-    private readonly publisher: SlackPublisher,
+    private readonly workerClient: WorkerClient,
     private readonly adminCommands?: AdminCommandHandler,
+    private readonly options: GatewayOptions = {},
   ) {}
 
-  public async handleMessageEvent(event: SlackMessageEvent): Promise<void> {
-    let rootThreadTs = event.ts;
-    let pendingAttachmentKey: string | undefined;
-    let previousPendingDirectory: string | undefined;
-    let nextSessionState: Session['state'] | undefined;
-
+  public async handleMessage(thread: GatewayThread, event: SlackMessageEvent): Promise<void> {
     try {
       if (event.channel_type !== 'im' || (event.subtype && event.subtype !== 'file_share')) {
         return;
       }
 
-      rootThreadTs =
-        event.assistant_thread?.thread_ts ??
-        (event.parent_user_id && event.thread_ts ? event.thread_ts : event.ts);
-      pendingAttachmentKey = this.toPendingAttachmentKey(event.team_id, event.channel_id, rootThreadTs);
-      previousPendingDirectory = this.pendingAttachmentDirectories.get(pendingAttachmentKey);
-
       if (event.attachment_warnings && event.attachment_warnings.length > 0) {
-        await this.publisher.postThreadMessage({
-          channel_id: event.channel_id,
-          root_thread_ts: rootThreadTs,
-          text: [
+        await thread.post(
+          [
             ':warning: 次の添付ファイルは worker に渡していません。',
             ...event.attachment_warnings,
           ].join('\n'),
-        });
+        );
       }
 
       if (!event.text.trim() && !event.downloaded_files_count && event.attachment_warnings?.length) {
@@ -108,92 +79,116 @@ export class Gateway implements GatewayNotifier {
 
       const adminCommand = parseAdminCommand(event.text);
       if (adminCommand && this.adminCommands) {
-        const response = await this.adminCommands.execute(adminCommand);
-        await this.publisher.postThreadMessage({
-          channel_id: event.channel_id,
-          root_thread_ts: rootThreadTs,
-          text: response,
+        await thread.post(await this.adminCommands.execute(adminCommand));
+        return;
+      }
+
+      const state = await this.readThreadState(thread);
+      if (!state?.codexThreadId) {
+        const { codex_thread_id } = await this.workerClient.createThread();
+        await this.saveThreadState(thread, {
+          codexThreadId: codex_thread_id,
+          pendingApprovalId: null,
+        });
+
+        await this.runWorkerFlow({
+          thread,
+          action: async (onEvent) => this.workerClient.sendUserMessage({
+            codex_thread_id,
+            user_id: event.user_id,
+            text: event.text,
+          }, { onEvent }),
         });
         return;
       }
 
-      if (rootThreadTs === event.ts) {
-        const input: StartSessionInput = {
-          channel_team_id: event.team_id,
-          channel_id: event.channel_id,
-          channel_thread_id: rootThreadTs,
-          user_id: event.user_id,
-          text: event.text,
-        };
-        nextSessionState = (await this.orchestrator.startSession(input)).state;
+      if (state.pendingApprovalId) {
+        const approvalId = state.pendingApprovalId;
+        const rejectResult = await this.runWorkerFlow({
+          thread,
+          notifyProgress: false,
+          action: async (onEvent) => this.workerClient.sendApprovalDecision({
+            codex_thread_id: state.codexThreadId,
+            approval_id: approvalId,
+            decision: 'reject',
+          }, { onEvent }),
+        });
+        if (!rejectResult.ok) {
+          return;
+        }
+        await this.clearPendingApprovalIfUnchanged(thread, state.codexThreadId, approvalId);
+
+        await this.runWorkerFlow({
+          thread,
+          action: async (onEvent) => this.workerClient.sendUserMessage({
+            codex_thread_id: state.codexThreadId,
+            user_id: event.user_id,
+            text: event.text,
+          }, { onEvent }),
+        });
         return;
       }
 
-      const input: ContinueSessionInput = {
-        channel_team_id: event.team_id,
-        channel_id: event.channel_id,
-        channel_thread_id: rootThreadTs,
-        user_id: event.user_id,
-        text: event.text,
-      };
-      nextSessionState = (await this.orchestrator.continueSession(input)).state;
+      await this.runWorkerFlow({
+        thread,
+        action: async (onEvent) => this.workerClient.sendSteerMessage({
+          codex_thread_id: state.codexThreadId,
+          user_id: event.user_id,
+          text: event.text,
+        }, { onEvent }),
+      });
     } finally {
-      if (pendingAttachmentKey) {
-        await this.reconcilePendingAttachmentDirectory(
-          pendingAttachmentKey,
-          previousPendingDirectory,
-          event.temporary_directory,
-          nextSessionState,
-        );
-      } else if (event.temporary_directory) {
+      if (event.temporary_directory) {
         await rm(event.temporary_directory, { recursive: true, force: true });
       }
     }
   }
 
-  public async handleApprovalAction(action: SlackApprovalAction): Promise<void> {
-    const pendingAttachmentKey = this.toPendingAttachmentKey(
-      action.team_id,
-      action.channel_id,
-      action.root_thread_ts,
-    );
-    const input: ResolveApprovalInput = {
-      channel_team_id: action.team_id,
-      channel_id: action.channel_id,
-      channel_thread_id: action.root_thread_ts,
-      approval_id: action.approval_id,
-      decision: action.decision,
-    };
-
-    const resolved = await this.orchestrator.resolveApproval(input);
-    if (resolved.state !== 'waiting_approval') {
-      const pendingDirectory = this.pendingAttachmentDirectories.get(pendingAttachmentKey);
-      this.pendingAttachmentDirectories.delete(pendingAttachmentKey);
-      if (pendingDirectory) {
-        await rm(pendingDirectory, { recursive: true, force: true });
-      }
+  public async handleApprovalAction(
+    thread: GatewayThread | null,
+    action: GatewayApprovalAction,
+  ): Promise<boolean> {
+    if (!thread) {
+      return false;
     }
+
+    const state = await this.readThreadState(thread);
+    if (!state?.codexThreadId) {
+      return false;
+    }
+
+    const approvalId = state.pendingApprovalId ?? action.approval_id;
+    const result = await this.runWorkerFlow({
+      thread,
+      notifyProgress: false,
+      action: async (onEvent) => this.workerClient.sendApprovalDecision({
+        codex_thread_id: state.codexThreadId,
+        approval_id: approvalId,
+        decision: action.decision,
+      }, { onEvent }),
+    });
+    if (!result.ok) {
+      return false;
+    }
+
+    await this.clearPendingApprovalIfUnchanged(thread, state.codexThreadId, approvalId);
+    return true;
   }
 
-  public async notifyProgress(session: Session, message: string): Promise<void> {
+  public async notifyProgress(thread: GatewayThread, message: string): Promise<void> {
     const loadingMessage = toSlackLoadingMessage(message);
+    if (this.options.slackAgentChatStatusEnabled === false) {
+      await thread.post(loadingMessage);
+      return;
+    }
 
     try {
-      await this.publisher.setThreadStatus({
-        channel_id: session.slack_channel_id,
-        root_thread_ts: session.slack_root_thread_ts,
-        status: message,
-        loading_messages: [loadingMessage],
-      });
+      await thread.startTyping(loadingMessage);
     } catch (error) {
       // eslint-disable-next-line no-console
       console.error(`[slack:status-error] ${String(error)}`);
       try {
-        await this.publisher.postThreadMessage({
-          channel_id: session.slack_channel_id,
-          root_thread_ts: session.slack_root_thread_ts,
-          text: loadingMessage,
-        });
+        await thread.post(loadingMessage);
       } catch (fallbackError) {
         // eslint-disable-next-line no-console
         console.error(`[slack:status-fallback-error] ${String(fallbackError)}`);
@@ -201,106 +196,140 @@ export class Gateway implements GatewayNotifier {
     }
   }
 
-  public async notifyApproval(
-    session: Session,
-    approval: { approval_id: string; prompt: string },
-  ): Promise<void> {
-    const actionValue = JSON.stringify({
-      team_id: session.slack_team_id,
-      channel_id: session.slack_channel_id,
-      root_thread_ts: session.slack_root_thread_ts,
-      approval_id: approval.approval_id,
-    });
+  public async notifyApproval(thread: GatewayThread, approval: ApprovalRequest): Promise<void> {
     const displayPrompt = toSlackApprovalPrompt(approval.prompt);
-
-    await this.publisher.postThreadMessage({
-      channel_id: session.slack_channel_id,
-      root_thread_ts: session.slack_root_thread_ts,
-      text: approval.prompt,
-      blocks: [
-        {
-          type: 'section',
-          text: {
-            type: 'mrkdwn',
-            text: displayPrompt,
-          },
-        },
-        {
-          type: 'actions',
-          elements: [
-            {
-              type: 'button',
-              action_id: 'approve',
-              text: { type: 'plain_text', text: 'Approve' },
-              style: 'primary',
-              value: actionValue,
-            },
-            {
-              type: 'button',
-              action_id: 'reject',
-              text: { type: 'plain_text', text: 'Reject' },
-              style: 'danger',
-              value: actionValue,
-            },
-          ],
-        },
-      ],
-    });
+    await thread.post(buildApprovalCard(displayPrompt, JSON.stringify(approval)));
   }
 
-  public async notifyCompleted(session: Session, message: string): Promise<void> {
+  public async notifyCompleted(thread: GatewayThread, message: string): Promise<void> {
     const rendered = renderSlackCompletedMessage(message);
 
-    if (rendered.text.trim()) {
-      await this.publisher.postThreadMessage({
-        channel_id: session.slack_channel_id,
-        root_thread_ts: session.slack_root_thread_ts,
-        text: rendered.text,
-      });
-    }
-
-    if (rendered.images.length > 0) {
-      await this.publisher.uploadThreadFiles({
-        channel_id: session.slack_channel_id,
-        root_thread_ts: session.slack_root_thread_ts,
-        files: rendered.images,
-      });
-    }
-  }
-
-  public async notifyFailed(session: Session, message: string): Promise<void> {
-    await this.publisher.postThreadMessage({
-      channel_id: session.slack_channel_id,
-      root_thread_ts: session.slack_root_thread_ts,
-      text: `:warning: ${message}`,
-    });
-  }
-
-  private toPendingAttachmentKey(teamId: string, channelId: string, rootThreadTs: string): string {
-    return `${teamId}:${channelId}:${rootThreadTs}`;
-  }
-
-  private async reconcilePendingAttachmentDirectory(
-    pendingAttachmentKey: string,
-    previousPendingDirectory: string | undefined,
-    currentTemporaryDirectory: string | undefined,
-    nextSessionState: Session['state'] | undefined,
-  ): Promise<void> {
-    if (nextSessionState === 'waiting_approval' && currentTemporaryDirectory) {
-      this.pendingAttachmentDirectories.set(pendingAttachmentKey, currentTemporaryDirectory);
-      if (previousPendingDirectory && previousPendingDirectory !== currentTemporaryDirectory) {
-        await rm(previousPendingDirectory, { recursive: true, force: true });
-      }
+    if (!rendered.text.trim() && rendered.images.length === 0) {
       return;
     }
 
-    this.pendingAttachmentDirectories.delete(pendingAttachmentKey);
-    const directories = new Set(
-      [previousPendingDirectory, currentTemporaryDirectory].filter((value): value is string => Boolean(value)),
-    );
-    for (const directory of directories) {
-      await rm(directory, { recursive: true, force: true });
+    if (rendered.images.length === 0) {
+      await thread.post({ markdown: rendered.text });
+      return;
     }
+
+    const files = await Promise.all(rendered.images.map(async (image) => ({
+      data: await readFile(image.path),
+      filename: basename(image.path),
+    })));
+    await thread.post({
+      markdown: rendered.text,
+      files,
+    });
+  }
+
+  public async notifyFailed(thread: GatewayThread, message: string): Promise<void> {
+    await thread.post(`:warning: ${message}`);
+  }
+
+  private async runWorkerFlow(input: {
+    thread: GatewayThread;
+    action: (onEvent: (event: WorkerRunEvent) => Promise<void>) => Promise<WorkerRunEvent[]>;
+    notifyProgress?: boolean;
+  }): Promise<WorkerFlowResult> {
+    try {
+      if (input.notifyProgress !== false) {
+        await this.notifyProgress(input.thread, 'thinking...');
+      }
+
+      let sawLiveEvent = false;
+      let failure: WorkerFlowResult | null = null;
+      const events = await input.action(async (event) => {
+        sawLiveEvent = true;
+        const result = await this.applyWorkerEvent(input.thread, event);
+        if (result && !result.ok) {
+          failure = result;
+        }
+      });
+
+      if (!sawLiveEvent) {
+        for (const event of events) {
+          const result = await this.applyWorkerEvent(input.thread, event);
+          if (result && !result.ok) {
+            failure = result;
+          }
+        }
+      }
+
+      return failure ?? { ok: true };
+    } catch (error) {
+      const message = `worker execution failed: ${String(error)}`;
+      await this.notifyFailed(input.thread, message);
+      return { ok: false, error: message };
+    }
+  }
+
+  private async applyWorkerEvent(
+    thread: GatewayThread,
+    event: WorkerRunEvent,
+  ): Promise<WorkerFlowResult | null> {
+    const state = await this.readThreadState(thread);
+    const codexThreadId = state?.codexThreadId ?? '';
+
+    if (event.type === 'progress') {
+      await this.notifyProgress(thread, event.message);
+      return null;
+    }
+
+    if (event.type === 'approval_required') {
+      if (codexThreadId) {
+        await this.saveThreadState(thread, {
+          codexThreadId,
+          pendingApprovalId: event.approval_id,
+        });
+      }
+      await this.notifyApproval(thread, {
+        approval_id: event.approval_id,
+        prompt: event.prompt,
+      });
+      return null;
+    }
+
+    if (event.type === 'completed') {
+      if (codexThreadId) {
+        await this.saveThreadState(thread, {
+          codexThreadId,
+          pendingApprovalId: null,
+        });
+      }
+      await this.notifyCompleted(thread, event.message);
+      return null;
+    }
+
+    await this.notifyFailed(thread, event.error);
+    return { ok: false, error: event.error };
+  }
+
+  private async clearPendingApprovalIfUnchanged(
+    thread: GatewayThread,
+    codexThreadId: string,
+    approvalId: string,
+  ): Promise<void> {
+    const state = await this.readThreadState(thread);
+    if (state?.codexThreadId !== codexThreadId || state.pendingApprovalId !== approvalId) {
+      return;
+    }
+
+    await this.saveThreadState(thread, {
+      codexThreadId,
+      pendingApprovalId: null,
+    });
+  }
+
+  private async readThreadState(thread: GatewayThread): Promise<ThreadSessionState | null> {
+    return await thread.state;
+  }
+
+  private async saveThreadState(
+    thread: GatewayThread,
+    state: ThreadSessionState,
+  ): Promise<void> {
+    await thread.setState(state, { replace: true });
   }
 }
 
@@ -311,6 +340,7 @@ export function toSlackApprovalPrompt(prompt: string): string {
 
   return `${prompt.slice(0, SLACK_APPROVAL_PROMPT_BLOCK_LIMIT - 1).trimEnd()}…`;
 }
+
 
 export {
   extractLocalImageFiles,

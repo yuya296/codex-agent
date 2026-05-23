@@ -45,9 +45,9 @@ test('docker entrypoint repairs an invalid seeded skill when the default skill h
         CODEX_HOME_DEFAULTS_DIR: defaultsDir,
         PLAYWRIGHT_AGENT_PROFILE_DIR: profilesDir,
         PLAYWRIGHT_MCP_CONFIG: join(runDir, 'playwright.json'),
-        SQLITE_PATH: join(dataDir, 'app.sqlite'),
         SLACK_BOT_TOKEN: 'xoxb-test',
         SLACK_APP_TOKEN: 'xapp-test',
+        REDIS_URL: 'redis://localhost:6379',
       },
     });
 

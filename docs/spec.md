@@ -10,7 +10,7 @@
 - `codex app-server` を実行バックエンドとして使う
 - approval を Slack 上で `Approve / Reject` で処理する
 - Docker で起動できる
-- SQLite に最小限の session 情報を保存する
+- Chat SDK `thread.state` に最小状態を保存する
 
 ## Out of scope
 
@@ -28,12 +28,14 @@
 - `running` 中の追加投稿は queue せず steer として扱う
 - `waiting_approval` 中の追加投稿は現在の approval を reject 扱いにして新しい入力として扱う
 - failure 後も同じ Slack thread から再開可能とする
+- sqlite session migration は廃止済みで、旧モデルからの初回アップグレード時に進行中 session は引き継がれない
 
 ## Persistence policy
 
-- SQLite の owner は `orchestrator`
-- 保持するのは session 対応関係と最小状態に留める
+- 保持するのは `codexThreadId` と `pendingApprovalId` に留める
+- owner は Chat SDK `thread.state`
 - 会話本文や approval 状態の source of truth は `codex app-server`
+- `SESSION_MIGRATION_SQLITE_PATH` は受け付けず、設定時は起動前にエラーにする
 
 ## Reading guide
 

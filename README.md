@@ -1,18 +1,19 @@
 # codex-agent
 
 Slack DM と Codex (`codex app-server`) をつなぐ最小構成のエージェントです。  
-構成は `gateway / orchestrator / worker` を中心にした最小構成です。
+構成は `gateway / worker` を中心にした最小構成で、会話制御は `Gateway` と Chat SDK の `thread.state` に寄せています。
 
 このリポジトリでは **ソースコードを SSoT (Single Source of Truth)** とし、`docs/` は思想、全体像、運用手順を補助する概要資料として扱います。
 
 ## 必要環境
 
-- Node.js 24 系（`node:sqlite` を利用）
+- Node.js 24 系
 - npm
 - Codex CLI（`codex app-server` が使えるバージョン）
-- Slack App のトークン
+- Slack App の認証情報
   - Bot Token: `xoxb-...`
-  - App Level Token: `xapp-...`（Socket Mode 用）
+  - App-Level Token: `xapp-...`
+- Redis
 
 ## セットアップ
 
@@ -27,30 +28,33 @@ npm install
 ```bash
 export SLACK_BOT_TOKEN='xoxb-...'
 export SLACK_APP_TOKEN='xapp-...'
+export REDIS_URL='redis://localhost:6379'
 ```
 
 必要に応じて以下も設定します。
 
+- `SLACK_BOT_USERNAME`
 - `CODEX_HOME`
 - `CODEX_WORKER_COMMAND`
 - `CODEX_WORKER_ARGS`
 - `CODEX_WORKER_CWD`
 - `WORKER_STREAM_EVENT_TIMEOUT_MS`
-- `SQLITE_PATH`
 - `SLACK_AGENT_CHAT_STATUS_ENABLED`
+- `SLACK_ATTACHMENT_MAX_BYTES`
 - `DEBUG_SLACK_EVENTS`
 - `DEBUG_WORKER_EVENTS`
 - `DEBUG_WORKER_EVENT_DELTAS`
-- `PORT`
 
 デフォルト値:
 
 - `CODEX_WORKER_COMMAND`: `codex`
 - `CODEX_WORKER_ARGS`: `app-server`
+- `SLACK_BOT_USERNAME`: `codex-agent`
 - `CODEX_HOME`: `$CODEX_HOME` があればそれ、なければ `~/.codex`
+- `REDIS_URL`: 必須
 - `WORKER_STREAM_EVENT_TIMEOUT_MS`: `300000`
 - `SLACK_AGENT_CHAT_STATUS_ENABLED`: `false`
-- `SQLITE_PATH`: `./data/app.sqlite`
+- `SLACK_ATTACHMENT_MAX_BYTES`: `10485760`
 
 ## Docs
 
@@ -65,9 +69,11 @@ export SLACK_APP_TOKEN='xapp-...'
 
 必要な権限の要点:
 
-- App-Level Token scope: `connections:write`
-- Bot Token Scopes: `chat:write`, `im:history`, `files:write`, `files:read`
-- Event Subscription: `message.im`
+- Bot Token Scopes: `chat:write`, `im:history`, `files:write`, `files:read`, `assistant:write`
+- App-Level Token Scopes: `connections:write`
+- Event Subscription: `message.im`, `assistant_thread_started`, `assistant_thread_context_changed`
+- Interactivity: ON
+- Socket Mode: ON
 - `Agents & AI Apps`: ON
 - `Agent or Assistant`: OFF
 
@@ -82,14 +88,14 @@ npm run doctor
 - `npm install` 済みか
 - `codex` コマンド実行可否
 - `codex app-server` サブコマンド有無
-- `node:sqlite` のロード可否
-- `sqlite3` CLI（任意、未導入は WARN）
 
 ## 起動
 
 ```bash
 npm start
 ```
+
+SQLite-backed session model からの初回アップグレードでは、進行中 session と pending approval は引き継がれません。`SESSION_MIGRATION_SQLITE_PATH` は廃止済みで、設定すると起動時にエラーにします。
 
 ## Docker で起動
 
@@ -106,7 +112,6 @@ docker compose exec app codex login --device-auth
 
 - Codex 認証: `./.docker/codex-home`
 - Playwright profile: `./.docker/playwright-agent-profile`
-- SQLite: `./.docker/data/app.sqlite`
 - app / worker の作業ディレクトリ: `/app`
 
 remote Docker host では `compose.server.yaml` を追加指定します。
@@ -164,6 +169,8 @@ npm run dev
 ```bash
 SLACK_BOT_TOKEN=xoxb-...
 SLACK_APP_TOKEN=xapp-...
+SLACK_BOT_USERNAME=codex-agent
+REDIS_URL=redis://localhost:6379
 APP_IMAGE=codex-agent:local
 DEBUG_SLACK_EVENTS=false
 DEBUG_WORKER_EVENTS=false
@@ -173,16 +180,19 @@ CODEX_WORKER_COMMAND=codex
 CODEX_WORKER_ARGS="app-server"
 CODEX_WORKER_CWD=/app
 WORKER_STREAM_EVENT_TIMEOUT_MS=300000
-SQLITE_PATH=./data/app.sqlite
 SLACK_AGENT_CHAT_STATUS_ENABLED=false
-PORT=
+SLACK_ATTACHMENT_MAX_BYTES=10485760
 ```
 
 remote 用テンプレートは `deploy/env/server.env.example` を使います。`HOST_STATE_ROOT` は remote 専用 compose 変数で、既定値は `/srv/codex-agent` です。
 
 `SLACK_AGENT_CHAT_STATUS_ENABLED=true` にすると、進捗通知に `assistant.threads.setStatus` を使います。classic な DM スレッド返信を維持したい場合は、Slack App 側の `Agent or Assistant` は OFF にしてください。
 
-通常回答の completed メッセージは、送信直前に Markdown を Slack 向けテキストへ整形します。箇条書きは `* `、番号付きリストは `1. ` の行構造を保つようにしています。ローカル画像パス（`/tmp/...png` など）が含まれる場合は、本文から取り除いたうえで thread にファイル添付します。Slack で受け取った添付ファイルは bot token の `files:read` で download し、対応形式の画像・PDF・テキスト系ファイルは一時ファイルのパスを worker に渡します。テキスト系と PDF は内容プレビューも worker 入力へ埋め込みます。未対応 MIME type やサイズ上限超過は thread に warning を返し、turn 後に一時ディレクトリを cleanup します。approval と status は今回の変換対象外です。
+DM の流れは、初回投稿を `onDirectMessage`、その後の継続投稿を `onSubscribedMessage` として扱います。会話の継続に必要な最小状態は Chat SDK の `thread.state` に置き、SQLite の移行手順はありません。
+
+Chat SDK の Slack Socket Mode を使います。public webhook URL は不要で、`SLACK_APP_TOKEN` を使って Slack へ WebSocket 接続します。
+
+通常回答の completed メッセージは、送信直前に Markdown を Slack 向けテキストへ整形します。箇条書きは `* `、番号付きリストは `1. ` の行構造を保つようにしています。ローカル画像パス（`/tmp/...png` など）が含まれる場合は、本文から取り除いたうえで thread にファイル添付します。Slack で受け取った添付ファイルは bot token の `files:read` で download し、一時ファイルのパスを worker に渡します。画像・PDF・テキスト系のうち PDF とテキスト系は内容プレビューも worker 入力へ埋め込みます。プレビュー対象外の MIME (zip, docx, バイナリなど) もパスは worker に渡され、codex 側のツールで読み込めます。サイズ上限超過 (`SLACK_ATTACHMENT_MAX_BYTES`、既定 10 MiB) は thread に warning を返し、turn 後に一時ディレクトリを cleanup します。approval と status は今回の変換対象外です。
 
 DM では管理コマンドも使えます。Slack の slash command ではなく通常メッセージとして送ります。先頭の空白は任意です。
 

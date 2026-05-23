@@ -1,9 +1,13 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import type { Session } from '../../src/domain/types.js';
-import type { GatewayNotifier } from '../../src/orchestrator/orchestrator.js';
 import type { WorkerClient, WorkerRunEvent, WorkerRunOptions } from '../../src/worker/types.js';
+import type { ThreadSessionState } from '../../src/domain/types.js';
+
+export interface ThreadStateLike {
+  codexThreadId: string;
+  pendingApprovalId: string | null;
+}
 
 export function createTempDir(prefix = 'codex-agent-test-'): string {
   return mkdtempSync(join(tmpdir(), prefix));
@@ -11,6 +15,14 @@ export function createTempDir(prefix = 'codex-agent-test-'): string {
 
 export function cleanupDir(path: string): void {
   rmSync(path, { recursive: true, force: true });
+}
+
+export function createThreadState(overrides: Partial<ThreadStateLike> = {}): ThreadStateLike {
+  return {
+    codexThreadId: 'thread-1',
+    pendingApprovalId: null,
+    ...overrides,
+  };
 }
 
 export class MockWorkerClient implements WorkerClient {
@@ -85,33 +97,34 @@ export class MockWorkerClient implements WorkerClient {
   }
 }
 
-export class MockNotifier implements GatewayNotifier {
-  public readonly progressMessages: string[] = [];
-  public readonly approvalEvents: Array<{ approval_id: string; prompt: string }> = [];
-  public readonly completedMessages: string[] = [];
-  public readonly failedMessages: string[] = [];
-  public readonly touchedSessionIds: string[] = [];
+export class MockGatewayThread {
+  public readonly id = 'slack:D1:100.1';
+  public readonly channelId = 'D1';
+  public readonly isDM = true;
+  public readonly postCalls: unknown[] = [];
+  public readonly startTypingCalls: Array<{ status?: string }> = [];
+  public readonly setStateCalls: Array<{ state: ThreadSessionState; replace?: boolean }> = [];
+  public readonly subscribeCalls: number[] = [];
+  public state: ThreadSessionState | null = null;
+  public startTypingImpl: (status?: string) => Promise<void> = async () => {};
+  public subscribeImpl: () => Promise<void> = async () => {};
 
-  public async notifyProgress(session: Session, message: string): Promise<void> {
-    this.touchedSessionIds.push(session.session_id);
-    this.progressMessages.push(message);
+  public async post(input: unknown): Promise<void> {
+    this.postCalls.push(input);
   }
 
-  public async notifyApproval(
-    session: Session,
-    approval: { approval_id: string; prompt: string },
-  ): Promise<void> {
-    this.touchedSessionIds.push(session.session_id);
-    this.approvalEvents.push(approval);
+  public async startTyping(status?: string): Promise<void> {
+    this.startTypingCalls.push({ status });
+    await this.startTypingImpl(status);
   }
 
-  public async notifyCompleted(session: Session, message: string): Promise<void> {
-    this.touchedSessionIds.push(session.session_id);
-    this.completedMessages.push(message);
+  public async subscribe(): Promise<void> {
+    this.subscribeCalls.push(Date.now());
+    await this.subscribeImpl();
   }
 
-  public async notifyFailed(session: Session, message: string): Promise<void> {
-    this.touchedSessionIds.push(session.session_id);
-    this.failedMessages.push(message);
+  public async setState(state: ThreadSessionState, options?: { replace?: boolean }): Promise<void> {
+    this.setStateCalls.push({ state, replace: options?.replace });
+    this.state = state;
   }
 }

@@ -1,35 +1,31 @@
 # Slack API 設定ガイド
 
-`codex-agent` は Slack Socket Mode で動作します。  
-このドキュメントでは、Slack App の作成から `npm start` で受信できる状態までを説明します。
+`codex-agent` は既定で Slack Socket Mode で動作します。  
+このドキュメントでは、Slack App の作成から Socket Mode で DM と interactivity を受ける状態までを説明します。
 
-classic な DM スレッド返信を維持しつつ loading status を使う前提なので、Slack App 側では `Agents & AI Apps` は有効化しますが、`Agent or Assistant` は OFF にします。`codex-agent` 側では `SLACK_AGENT_CHAT_STATUS_ENABLED=true` を設定します。既定値は `false` で、未対応 token や通常 DM 運用ではそのまま使えます。
+会話は Chat SDK の `thread.state` に寄せ、初回 DM は `onDirectMessage`、同じ thread にぶら下がる継続投稿は `onSubscribedMessage` で処理します。SQLite の移行手順はありません。classic な DM 返信のまま loading status を使う前提なので、Slack App 側では `Agents & AI Apps` は有効化しますが、`Agent or Assistant` は OFF にします。`codex-agent` 側では `SLACK_AGENT_CHAT_STATUS_ENABLED=true` を設定します。既定値は `false` で、未対応 token や通常 DM 運用ではそのまま使えます。
 
 ## 必要な権限と設定
 
-- App-Level Token scope: `connections:write`
 - Bot Token Scopes: `chat:write`, `im:history`, `files:write`, `files:read`
-- Event Subscriptions: `message.im`
-- Required features: `Socket Mode`, `Interactivity & Shortcuts`, `Agents & AI Apps`, `App Home` のメッセージ送信許可
+- App-Level Token Scopes: `connections:write`
+- `SLACK_AGENT_CHAT_STATUS_ENABLED=true` を使う場合は `assistant:write`
+- Event Subscriptions: `message.im`, `assistant_thread_started`, `assistant_thread_context_changed`
+- Required features: `Socket Mode`, `Event Subscriptions`, `Interactivity & Shortcuts`, `Agents & AI Apps`
 
-不要なもの:
-
-- `assistant:write` はこの実装では不要
-- `assistant_thread_started` と `assistant_thread_context_changed` はこの実装では不要
-
-## 1. Slack App を作成
+## Slack App を作成
 
 1. Slack API の管理画面で「Create New App」を選択
 2. 「From scratch」を選び、アプリ名と対象 Workspace を指定して作成
 
-## 2. Socket Mode を有効化
+## Socket Mode を有効化
 
-1. `Socket Mode` を ON
-2. `App-Level Tokens` で新規トークンを作成
-3. Scope は `connections:write` を付与
-4. 発行された `xapp-...` を控える（`SLACK_APP_TOKEN`）
+1. Slack App 管理画面の `Socket Mode` を開く
+2. Socket Mode を ON にする
+3. `connections:write` scope を持つ App-Level Token を作成する
+4. 発行された `xapp-...` を `SLACK_APP_TOKEN` に設定する
 
-## 3. Agents & AI Apps を設定
+## Agents & AI Apps を設定
 
 1. Slack App 管理画面の `Agents & AI Apps` を開く
 2. `Agent or Assistant` は OFF のままにする
@@ -41,22 +37,15 @@ classic な DM スレッド返信を維持しつつ loading status を使う前�
 - `Agent or Assistant Overview` は未入力でも問題ありません
 - `Suggested Prompts` は今回の実装では不要です
 
-## 4. App Home でメッセージ送信を有効化
-
-1. `Features` > `App Home` を開く
-2. `Show Tabs` の `Messages Tab` を ON にする
-3. `Allow users to send Slash commands and messages from the messages tab` を ON にする
-
-Slack で「このアプリへのメッセージ送信はオフにされています。」と出る場合は、まずここを確認してください。
-
-## 5. Bot Token Scope を設定
+## Bot Token Scope を設定
 
 `OAuth & Permissions` の `Bot Token Scopes` に次を追加します。
 
 - `chat:write`（Bot がスレッド返信し、AgentChat status 更新にも使う）
 - `im:history`（DM の `message.im` イベントを購読するため）
 - `files:write`（ローカル画像を thread に添付アップロードするため）
-- `files:read`（Slack で受け取った画像・PDF・テキスト系添付を download して worker に渡すため）
+- `files:read`（Slack で受け取った添付を download して worker に渡すため。プレビュー対象外の MIME もパスとして渡し、サイズ上限 `SLACK_ATTACHMENT_MAX_BYTES` 超過のみ warning）
+- `assistant:write`（`SLACK_AGENT_CHAT_STATUS_ENABLED=true` のときだけ）
 
 補足:
 
@@ -64,31 +53,35 @@ Slack で「このアプリへのメッセージ送信はオフにされてい�
 - `assistant.threads.setStatus` は 2026年3月5日時点で `chat:write` で利用可能です。
 - パブリックチャンネル運用を追加する場合は、別途 scope とイベント購読を追加してください。
 
-## 6. Event Subscriptions を設定
+## Event Subscriptions を設定
 
 1. `Event Subscriptions` を ON
-2. `Subscribe to bot events` に `message.im` を追加
+2. `Subscribe to bot events` に次を追加
+   - `message.im`
+   - `assistant_thread_started`
+   - `assistant_thread_context_changed`
 
-classic thread 前提では `message.im` のみで十分です。
+classic thread 前提では DM しか処理しませんが、Chat SDK の Slack adapter と status 対応のため上記イベントをそろえます。
 
-## 7. Interactivity を有効化
+## Interactivity を有効化
 
 `Interactivity & Shortcuts` を ON にします。  
-本アプリは Approve/Reject ボタンを使うため、Interactivity が必要です。
+本アプリは Approve/Reject ボタンを使うため、Interactivity が必要です。Socket Mode では public Request URL は不要です。
 
-## 8. Workspace にインストール
+## Workspace にインストール
 
 1. `Install App`（または `Reinstall to Workspace`）を実行
 2. 発行された `Bot User OAuth Token` (`xoxb-...`) を控える（`SLACK_BOT_TOKEN`）
 
 scope や event を変更した場合も、必ず `Reinstall to Workspace` を実行してください。
 
-## 9. codex-agent 側に設定
+## codex-agent 側に設定
 
 環境変数で最低限以下を設定します。
 
 - `SLACK_BOT_TOKEN`: `xoxb-...`
 - `SLACK_APP_TOKEN`: `xapp-...`
+- `REDIS_URL`: `redis://localhost:6379` など
 - `SLACK_AGENT_CHAT_STATUS_ENABLED`: AgentChat status を使うときだけ `true`
 - `CODEX_WORKER_COMMAND`: `codex`
 - `CODEX_WORKER_ARGS`: `app-server`
@@ -98,12 +91,13 @@ scope や event を変更した場合も、必ず `Reinstall to Workspace` を�
 ```bash
 export SLACK_BOT_TOKEN='xoxb-...'
 export SLACK_APP_TOKEN='xapp-...'
+export REDIS_URL='redis://localhost:6379'
 export SLACK_AGENT_CHAT_STATUS_ENABLED=true
 ```
 
 未対応 token や通常 DM 運用では `false` のまま使ってください。
 
-## 10. 動作確認
+## 動作確認
 
 ```bash
 npm run doctor
@@ -120,8 +114,10 @@ Slack で Bot に DM を送り、次を確認します。
 ## トラブルシュート
 
 - `not_authed` / `invalid_auth`
-  - トークン文字列の取り違えを確認（`xoxb-` と `xapp-`）
+  - Bot token の再取得を確認（`xoxb-...`）
   - App を再インストールして最新 token を再取得
+- `invalid signature`
+  - 現在の Socket Mode 実装では通常発生しません。`SLACK_APP_TOKEN` と Socket Mode 設定を確認してください。
 - AgentChat の status が出ない
   - `Agents & AI Apps` の画面が利用可能な app か確認
   - `Agent or Assistant` を OFF にしているか確認

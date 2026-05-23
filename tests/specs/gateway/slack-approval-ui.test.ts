@@ -1,47 +1,31 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  buildResolvedApprovalBlocks,
-  getActionMessageTs,
-  readApprovalPrompt,
-} from '../../../src/gateway/bolt.js';
+  buildApprovalCard,
+  buildResolvedApprovalCard,
+} from '../../../src/gateway/gateway-cards.js';
+import { toSlackApprovalPrompt } from '../../../src/gateway/gateway.js';
 
-test('Slack approval UI replaces decision buttons with the chosen result after an approval is resolved', () => {
-  const blocks = buildResolvedApprovalBlocks('approve this?', 'approve');
+test('Slack approval UI renders approve and reject actions with the encoded payload', () => {
+  const card = buildApprovalCard('approve this?', '{"approval_id":"approval-1"}') as any;
 
-  assert.equal(blocks.length, 2);
-  assert.equal((blocks[0] as any).type, 'section');
-  assert.equal((blocks[1] as any).type, 'context');
-  assert.match((blocks[1] as any).elements[0].text, /Approve/);
+  const actions = card.children[1].children;
+  assert.equal(card.title, 'Approval required');
+  assert.equal(actions[0].id, 'approve');
+  assert.equal(actions[1].id, 'reject');
+  assert.equal(actions[0].value, '{"approval_id":"approval-1"}');
 });
 
-test('Slack approval UI truncates oversized prompts so resolved blocks stay within Slack limits', () => {
-  const blocks = buildResolvedApprovalBlocks('x'.repeat(4000), 'approve');
+test('Slack approval UI replaces actions with a resolved summary after an approval is resolved', () => {
+  const card = buildResolvedApprovalCard('approve this?', 'approve') as any;
 
-  assert.equal((((blocks[0] as any).text?.text) as string).length <= 3000, true);
+  assert.equal(card.title, 'Approval resolved');
+  assert.equal(card.children[1].content, '選択: Approve');
 });
 
-test('Slack approval UI targets the container message timestamp first when updating an action response', () => {
-  assert.equal(
-    getActionMessageTs({
-      container: { message_ts: '100.1' },
-      message: { ts: '100.2' },
-    }),
-    '100.1',
-  );
-});
+test('Slack approval UI truncates oversized prompts so the rendered card stays within Slack limits', () => {
+  const truncated = toSlackApprovalPrompt('x'.repeat(4000));
 
-test('Slack approval UI falls back to the payload text when approval blocks are unavailable', () => {
-  assert.equal(readApprovalPrompt({}, 'approve this?'), 'approve this?');
-});
-
-test('Slack approval UI falls back to the plain message text before legacy action payloads', () => {
-  assert.equal(
-    readApprovalPrompt({
-      message: {
-        text: 'full approval prompt',
-      },
-    }, 'truncated prompt'),
-    'full approval prompt',
-  );
+  assert.equal(truncated.length <= 3000, true);
+  assert.equal(truncated.endsWith('…'), true);
 });

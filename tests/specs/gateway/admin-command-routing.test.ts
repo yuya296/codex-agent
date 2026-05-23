@@ -1,36 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Gateway, type SlackPublisher } from '../../../src/gateway/gateway.js';
+import { Gateway } from '../../../src/gateway/gateway.js';
+import { MockGatewayThread, MockWorkerClient } from '../../support/helpers.js';
 
-test('gateway routing answers admin commands without starting or continuing a session', async () => {
-  const calls: string[] = [];
-  const posted: Array<{ root_thread_ts: string; text: string }> = [];
-
+test('gateway routing answers admin commands through the admin command handler', async () => {
+  const thread = new MockGatewayThread();
   const gateway = new Gateway(
-    {
-      startSession: async () => {
-        calls.push('start');
-        throw new Error('should not be called');
-      },
-      continueSession: async () => {
-        calls.push('continue');
-        throw new Error('should not be called');
-      },
-      resolveApproval: async () => {},
-    } as any,
-    {
-      postThreadMessage: async (input) => {
-        posted.push({ root_thread_ts: input.root_thread_ts, text: input.text });
-      },
-      uploadThreadFiles: async () => {},
-      setThreadStatus: async () => {},
-    } satisfies SlackPublisher,
+    new MockWorkerClient(),
     {
       execute: async () => 'Status\n- Codex CLI: codex-cli 0.116.0',
     },
   );
 
-  await gateway.handleMessageEvent({
+  await gateway.handleMessage(thread as any, {
     team_id: 'T1',
     channel_id: 'D1',
     user_id: 'U1',
@@ -39,8 +21,6 @@ test('gateway routing answers admin commands without starting or continuing a se
     channel_type: 'im',
   });
 
-  assert.deepEqual(calls, []);
-  assert.equal(posted.length, 1);
-  assert.equal(posted[0]?.root_thread_ts, '500.1');
-  assert.match(posted[0]?.text ?? '', /^Status/m);
+  assert.deepEqual(thread.postCalls, ['Status\n- Codex CLI: codex-cli 0.116.0']);
+  assert.deepEqual(thread.setStateCalls, []);
 });
