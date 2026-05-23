@@ -157,6 +157,8 @@ export class Gateway {
       return false;
     }
 
+    // state を優先することで、ユーザが古いカードのボタンを押下した場合でも最新の
+    // pendingApprovalId を解決する。worker 側で ID 不一致時はエラーを返す前提。
     const approvalId = state.pendingApprovalId ?? action.approval_id;
     const result = await this.runWorkerFlow({
       thread,

@@ -13,6 +13,7 @@ export interface AppConfig {
   workerCwd?: string;
   workerStreamEventTimeoutMs: number;
   slackAttachmentMaxBytes: number;
+  slackAttachmentTmpDir?: string;
 }
 
 export function loadConfigFromEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -43,6 +44,10 @@ export function loadConfigFromEnv(env: NodeJS.ProcessEnv = process.env): AppConf
     'SLACK_AGENT_CHAT_STATUS_ENABLED',
     false,
   );
+  const slackAttachmentTmpDir = readOptionalString(
+    env.SLACK_ATTACHMENT_TMP_DIR,
+    'SLACK_ATTACHMENT_TMP_DIR',
+  );
 
   return {
     slackBotToken,
@@ -56,6 +61,7 @@ export function loadConfigFromEnv(env: NodeJS.ProcessEnv = process.env): AppConf
     workerCwd: workerCwd ? expandHome(workerCwd) : undefined,
     workerStreamEventTimeoutMs,
     slackAttachmentMaxBytes,
+    slackAttachmentTmpDir: slackAttachmentTmpDir ? expandHome(slackAttachmentTmpDir) : undefined,
   };
 }
 
